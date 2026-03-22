@@ -55,7 +55,6 @@ export const ticketService = {
     // Mock Notification
     notifyClient: async (ticket, messageType) => {
         return new Promise(resolve => {
-            console.log(`[SIMULATION] Sending ${messageType} to ${ticket.clientPhone}: "Hola ${ticket.clientName}, novedades sobre tu ${ticket.deviceType}..."`);
             setTimeout(() => resolve({ success: true }), 1000);
         });
     }
