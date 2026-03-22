@@ -53,7 +53,7 @@ export const ticketService = {
     },
 
     // Mock Notification
-    notifyClient: async (ticket, messageType) => {
+    notifyClient: async (_ticket, _messageType) => {
         return new Promise(resolve => {
             setTimeout(() => resolve({ success: true }), 1000);
         });
