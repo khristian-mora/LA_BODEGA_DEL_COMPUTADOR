@@ -1,0 +1,18 @@
+User-agent: *
+Allow: /
+
+# Disallow admin and private areas
+Disallow: /admin/
+Disallow: /cart
+Disallow: /checkout
+Disallow: /login
+Disallow: /register
+Disallow: /forgot-password
+Disallow: /reset-password
+
+# Allow Googlebot images
+User-agent: Googlebot-Image
+Allow: /
+
+# Sitemap location
+Sitemap: https://labodegadelcomputador.com/sitemap.xml
