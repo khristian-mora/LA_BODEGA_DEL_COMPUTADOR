@@ -22,7 +22,7 @@
     "framer-motion": "^12.38.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "lucide-react": "^0.563.0",
+    "lucide-react": "^0.577.0",
     "multer": "^2.0.2",
     "mysql2": "^3.16.2",
     "nodemailer": "^7.0.13",
