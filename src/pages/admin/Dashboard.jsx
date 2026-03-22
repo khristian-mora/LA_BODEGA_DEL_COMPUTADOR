@@ -3,26 +3,29 @@ import AdminLayout from '../../layouts/AdminLayout';
 import { DollarSign, ShoppingBag, Clock, TrendingUp, Users, UserCircle, Wrench, Package, AlertTriangle, CheckCircle } from 'lucide-react';
 import { buildApiUrl } from '../../config/config';
 
-const DashboardCard = ({ title, value, subtext, icon: Icon, color, trend }) => (
-    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-start justify-between hover:shadow-md transition-shadow">
-        <div>
-            <p className="text-gray-500 text-sm font-medium mb-1">{title}</p>
-            <h3 className="text-3xl font-bold text-gray-900 mb-2">{value}</h3>
-            <p className={`text-xs font-bold ${color === 'green' ? 'text-green-600' : color === 'orange' ? 'text-orange-600' : color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
-                {trend && <span className="mr-1">{trend > 0 ? '↑' : trend < 0 ? '↓' : '→'}</span>}
-                {subtext}
-            </p>
+const DashboardCard = ({ title, value, subtext, icon, color, trend }) => {
+    const Icon = icon;
+    return (
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 flex items-start justify-between hover:shadow-md transition-shadow">
+            <div>
+                <p className="text-gray-500 text-sm font-medium mb-1">{title}</p>
+                <h3 className="text-3xl font-bold text-gray-900 mb-2">{value}</h3>
+                <p className={`text-xs font-bold ${color === 'green' ? 'text-green-600' : color === 'orange' ? 'text-orange-600' : color === 'red' ? 'text-red-600' : 'text-blue-600'}`}>
+                    {trend && <span className="mr-1">{trend > 0 ? '↑' : trend < 0 ? '↓' : '→'}</span>}
+                    {subtext}
+                </p>
+            </div>
+            <div className={`p-4 rounded-xl ${color === 'green' ? 'bg-green-50 text-green-600' :
+                color === 'orange' ? 'bg-orange-50 text-orange-600' :
+                    color === 'red' ? 'bg-red-50 text-red-600' :
+                        color === 'purple' ? 'bg-purple-50 text-purple-600' :
+                            'bg-blue-50 text-blue-600'
+                }`}>
+                <Icon className="w-6 h-6" />
+            </div>
         </div>
-        <div className={`p-4 rounded-xl ${color === 'green' ? 'bg-green-50 text-green-600' :
-            color === 'orange' ? 'bg-orange-50 text-orange-600' :
-                color === 'red' ? 'bg-red-50 text-red-600' :
-                    color === 'purple' ? 'bg-purple-50 text-purple-600' :
-                        'bg-blue-50 text-blue-600'
-            }`}>
-            <Icon className="w-6 h-6" />
-        </div>
-    </div>
-);
+    );
+};
 
 const AdminDashboard = () => {
     const [stats, setStats] = useState({

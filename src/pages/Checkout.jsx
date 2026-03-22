@@ -19,7 +19,7 @@ const Checkout = () => {
 
     // Nequi specific states
     const [nequiPhone, setNequiPhone] = useState('');
-    const [nequiStatus, setNequiStatus] = useState('idle'); // idle, waiting, error
+    const [nequiStatus, _setNequiStatus] = useState('idle'); // idle, waiting, error
     const [countDown, setCountDown] = useState(45);
 
     // Form states

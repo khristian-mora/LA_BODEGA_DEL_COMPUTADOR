@@ -48,8 +48,8 @@ const Catalog = () => {
     const [showFilters, setShowFilters] = useState(false);
     const [sortBy, setSortBy] = useState('default');
     const [viewMode, setViewMode] = useState('grid');
-    const [selectedBrand, setSelectedBrand] = useState('Todas');
-    const [stockFilter, setStockFilter] = useState('all'); // 'all', 'inStock', 'outOfStock'
+    const [selectedBrand, _setSelectedBrand] = useState('Todas');
+    const [stockFilter, _setStockFilter] = useState('all'); // 'all', 'inStock', 'outOfStock'
 
     // Categories derived from products
     const categories = ['All', ...new Set(products.map(p => p.category))];
@@ -57,7 +57,7 @@ const Catalog = () => {
     const categoriesToShow = ROUTE_TO_CATEGORIES[location.pathname] || categories.filter(c => c !== 'All');
     
     // Available brands for current category selection (before other filters)
-    const availableBrands = useMemo(() => {
+    const _availableBrands = useMemo(() => {
         let filteredByCategory = products;
         if (selectedCategory !== 'ALL') {
             filteredByCategory = products.filter(p => p.category === selectedCategory);

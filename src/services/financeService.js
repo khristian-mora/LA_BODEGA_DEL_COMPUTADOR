@@ -104,7 +104,7 @@ export const financeService = {
     },
 
     // Keep for backward compatibility but it's now a no-op
-    registerIncome: async (data) => {
+    registerIncome: async (_data) => {
         console.warn('registerIncome is deprecated. Income is now calculated from orders.');
         return { success: true };
     }

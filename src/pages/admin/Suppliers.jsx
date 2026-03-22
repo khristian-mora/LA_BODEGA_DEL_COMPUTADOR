@@ -8,7 +8,7 @@ import { useModal } from '../../context/ModalContext';
 const AdminSuppliers = () => {
     const { showConfirm } = useModal();
     const [suppliers, setSuppliers] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [_loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
 
     // Form State

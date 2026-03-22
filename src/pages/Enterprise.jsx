@@ -3,15 +3,18 @@ import Layout from '../layouts/Layout';
 import Button from '../components/Button';
 import { Wrench, Server, Headphones, ShieldCheck, Mail, Phone, MapPin } from 'lucide-react';
 
-const ServiceCard = ({ icon: Icon, title, description }) => (
-    <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-        <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mb-6">
-            <Icon className="w-7 h-7" />
+const ServiceCard = ({ icon, title, description }) => {
+    const Icon = icon;
+    return (
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
+            <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mb-6">
+                <Icon className="w-7 h-7" />
+            </div>
+            <h3 className="text-xl font-bold mb-3">{title}</h3>
+            <p className="text-gray-600 leading-relaxed">{description}</p>
         </div>
-        <h3 className="text-xl font-bold mb-3">{title}</h3>
-        <p className="text-gray-600 leading-relaxed">{description}</p>
-    </div>
-);
+    );
+};
 
 const Enterprise = () => {
     return (

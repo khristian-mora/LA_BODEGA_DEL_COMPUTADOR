@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { ticketService } from '../../services/ticketService';
-import { inventoryService } from '../../services/inventoryService';
 import { Plus, Wrench, CheckCircle, Clock, AlertCircle, Search, MessageSquare, DollarSign, PenTool, Camera, Image, ShoppingBag, Eye, X, Send, Upload, Loader, Mail, Edit2, List, LayoutGrid, Filter } from 'lucide-react';
 import Button from '../../components/Button';
 import PhotoEditor from '../../components/PhotoEditor';
@@ -78,11 +77,11 @@ const DashboardMetrics = ({ tickets }) => {
 
 
 const AdminTechService = () => {
-    const { formatPrice } = useShop();
+    const { formatPrice: _formatPrice } = useShop();
     const { logAction } = useAudit();
     const { showConfirm, showAlert, showPrompt } = useModal();
     const [tickets, setTickets] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [_loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [viewMode, setViewMode] = useState('list'); // 'list' or 'kanban'
     const [selectedTicket, setSelectedTicket] = useState(null); // For diagnosis modal

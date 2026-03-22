@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useSettings } from '../context/SettingsContext';
 import { Shield, Smartphone, CheckCircle, AlertCircle, Copy, Check } from 'lucide-react';
 import Button from './Button';
 

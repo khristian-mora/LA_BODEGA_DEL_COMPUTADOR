@@ -7,7 +7,7 @@ import { useModal } from '../../context/ModalContext';
 
 const AdminReports = () => {
     const { showAlert } = useModal();
-    const [loading, setLoading] = useState(true);
+    const [_loading, setLoading] = useState(true);
     const [dateRange, setDateRange] = useState({
         startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
         endDate: new Date().toISOString().split('T')[0]
@@ -18,7 +18,7 @@ const AdminReports = () => {
     const [serviceData, setServiceData] = useState([]);
     const [customerData, setCustomerData] = useState([]);
     const [topProducts, setTopProducts] = useState([]);
-    const [appointmentStats, setAppointmentStats] = useState([]);
+    const [_appointmentStats, setAppointmentStats] = useState([]);
 
     useEffect(() => {
         fetchReports();

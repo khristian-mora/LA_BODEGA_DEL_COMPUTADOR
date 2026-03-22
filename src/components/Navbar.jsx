@@ -8,7 +8,7 @@ import CartDrawer from './CartDrawer';
 
 const Navbar = () => {
     const { getCartCount } = useShop();
-    const { settings } = useSettings();
+    const { settings: _settings } = useSettings();
     const location = useLocation();
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);

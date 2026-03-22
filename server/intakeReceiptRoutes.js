@@ -1,7 +1,7 @@
 // Intake Receipt Generation (Comprobante de Ingreso)
 import { db } from './db.js';
 import nodemailer from 'nodemailer';
-import path from 'path';
+
 
 // Email transporter configuration (Reusing from other files, ideally should be a shared utility)
 const transporter = nodemailer.createTransport({
@@ -33,7 +33,7 @@ const generateIntakeHtml = (ticket, evidenceList = []) => {
     let legacyPhotos = [];
     try {
         legacyPhotos = typeof ticket.photosIntake === 'string' ? JSON.parse(ticket.photosIntake) : (ticket.photosIntake || []);
-    } catch (e) { legacyPhotos = []; }
+    } catch { legacyPhotos = []; }
 
     return `
 <!DOCTYPE html>

@@ -36,7 +36,7 @@ const generateCustomerReport = (ticket) => {
     try {
         findings = typeof ticket.findings === 'string' ? JSON.parse(ticket.findings) : (ticket.findings || []);
         recommendations = typeof ticket.recommendations === 'string' ? JSON.parse(ticket.recommendations) : (ticket.recommendations || []);
-    } catch (e) {
+    } catch {
         findings = [];
         recommendations = [];
     }
@@ -45,7 +45,7 @@ const generateCustomerReport = (ticket) => {
     let photos = [];
     try {
         photos = typeof ticket.photosIntake === 'string' ? JSON.parse(ticket.photosIntake) : (ticket.photosIntake || []);
-    } catch (e) {
+    } catch {
         photos = [];
     }
 

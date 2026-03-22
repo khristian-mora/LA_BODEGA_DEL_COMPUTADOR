@@ -1,6 +1,3 @@
-import { inventoryService } from './inventoryService';
-import { financeService } from './financeService';
-
 const API_URL = '/api/orders';
 
 export const orderService = {

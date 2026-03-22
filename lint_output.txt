@@ -1,0 +1,106 @@
+
+> labodega@0.0.0 lint
+> eslint .
+
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\server\server.js
+  357:93  error  'dbErr' is defined but never used. Allowed unused args must match /^_/u      no-unused-vars
+  371:90  error  'updateErr' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+  462:69  error  'err' is defined but never used. Allowed unused args must match /^_/u        no-unused-vars
+  722:63  error  Unnecessary escape character: \/                                             no-useless-escape
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\CartDrawer.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\CategoryGrid.jsx
+  3:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\ErrorBoundary.jsx
+  9:37  error  'error' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\Footer.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\Hero.jsx
+  3:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\Navbar.jsx
+   2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u             no-unused-vars
+  11:13  error  'settings' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\NotificationCenter.jsx
+  108:11  error  'getNotificationColor' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\PhotoEditor.jsx
+   8:12  error    'image' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u                         no-unused-vars
+  42:8   warning  React Hook useEffect has a missing dependency: 'saveState'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\ProductCard.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\TwoFactorModal.jsx
+  2:10  error  'useSettings' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\components\WhatsAppButton.jsx
+  2:10  error  'motion' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\context\ShopContext.jsx
+  14:18  error  'setUser' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\layouts\AdminLayout.jsx
+  19:8  warning  React Hook React.useEffect has missing dependencies: 'logAction' and 'user.id'. Either include them or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\Builder.jsx
+  170:66  error  'index' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\Catalog.jsx
+  51:27  error  'setSelectedBrand' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  52:25  error  'setStockFilter' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u    no-unused-vars
+  60:11  error  'availableBrands' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u   no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\Checkout.jsx
+  22:25  error  'setNequiStatus' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\Enterprise.jsx
+  6:30  error  'Icon' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\ResetPassword.jsx
+  9:11  error  'navigate' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Appointments.jsx
+  32:8  warning  React Hook useEffect has a missing dependency: 'fetchData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Customers.jsx
+  31:8  warning  React Hook useEffect has a missing dependency: 'fetchCustomers'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Dashboard.jsx
+  6:55  error  'Icon' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Reports.jsx
+  10:12  error    'loading' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u                          no-unused-vars
+  21:12  error    'appointmentStats' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u                 no-unused-vars
+  25:8   warning  React Hook useEffect has a missing dependency: 'fetchReports'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Suppliers.jsx
+  11:12  error  'loading' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\TechService.jsx
+   4:10  error  'inventoryService' is defined but never used. Allowed unused vars must match /^[A-Z_]/u      no-unused-vars
+  81:13  error  'formatPrice' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  85:12  error  'loading' is assigned a value but never used. Allowed unused vars must match /^[A-Z_]/u      no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Users.jsx
+  30:8  warning  React Hook useEffect has a missing dependency: 'fetchUsers'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\pages\admin\Warranties.jsx
+  29:8  warning  React Hook useEffect has a missing dependency: 'fetchData'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\services\financeService.js
+  107:28  error  'data' is defined but never used. Allowed unused args must match /^_/u  no-unused-vars
+
+C:\Users\Usuario\Desktop\desarollo\LBDC\src\services\orderService.js
+  1:10  error  'inventoryService' is defined but never used. Allowed unused vars must match /^[A-Z_]/u  no-unused-vars
+  2:10  error  'financeService' is defined but never used. Allowed unused vars must match /^[A-Z_]/u    no-unused-vars
+
+✖ 41 problems (34 errors, 7 warnings)
+

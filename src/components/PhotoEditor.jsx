@@ -5,7 +5,7 @@ import Button from './Button';
 const PhotoEditor = ({ imageUrl, onSave, onCancel }) => {
     const canvasRef = useRef(null);
     const [context, setContext] = useState(null);
-    const [image, setImage] = useState(null);
+    const [_image, setImage] = useState(null);
     const [tool, setTool] = useState('circle'); // circle, arrow, text
     const [color, setColor] = useState('#ff0000');
     const [isDrawing, setIsDrawing] = useState(false);

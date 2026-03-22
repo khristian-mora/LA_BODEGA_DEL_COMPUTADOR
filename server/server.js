@@ -354,7 +354,7 @@ app.post('/api/auth/setup-2fa', authenticateToken, async (req, res) => {
         if (err) return res.status(500).json({ error: 'Error generando QR' });
 
         // Save temporary secret (verify before enabling)
-        db.run('UPDATE users SET twoFactorSecret = ? WHERE id = ?', [secret, req.user.id], (dbErr) => {
+        db.run('UPDATE users SET twoFactorSecret = ? WHERE id = ?', [secret, req.user.id], (_dbErr) => {
             res.json({ qrCode: imageUrl, secret: secret });
         });
     });
@@ -368,7 +368,7 @@ app.post('/api/auth/verify-2fa', authenticateToken, (req, res) => {
 
         const isValid = authenticator.check(token, user.twoFactorSecret);
         if (isValid) {
-            db.run('UPDATE users SET twoFactorEnabled = 1 WHERE id = ?', [req.user.id], (updateErr) => {
+            db.run('UPDATE users SET twoFactorEnabled = 1 WHERE id = ?', [req.user.id], (_updateErr) => {
                 res.json({ success: true });
             });
         } else {
@@ -459,7 +459,7 @@ const cleanupOldEvidence = () => {
 // Get All Products
 app.get('/api/products', (req, res) => {
     // Add column if not exists (quick migration hack for dev)
-    db.run("ALTER TABLE products ADD COLUMN builderCategory TEXT", (err) => {
+    db.run("ALTER TABLE products ADD COLUMN builderCategory TEXT", (_err) => {
         // Ignore error if column exists
     });
 
@@ -719,7 +719,7 @@ app.get('/api/evidence/:id', (req, res) => {
     db.get('SELECT photo_data FROM ticket_evidence WHERE id = ?', [id], (err, row) => {
         if (err || !row) return res.status(404).send('Image not found');
 
-        const matches = row.photo_data.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+        const matches = row.photo_data.match(/^data:([A-Za-z+/]+);base64,(.+)$/);
         if (!matches || matches.length !== 3) {
             return res.status(500).send('Invalid image data');
         }

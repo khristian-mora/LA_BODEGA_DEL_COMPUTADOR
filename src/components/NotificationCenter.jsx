@@ -105,7 +105,7 @@ const NotificationCenter = () => {
         return icons[type] || '🔔';
     };
 
-    const getNotificationColor = (type) => {
+    const _getNotificationColor = (type) => {
         const colors = {
             'info': 'bg-blue-50 border-blue-200',
             'success': 'bg-green-50 border-green-200',

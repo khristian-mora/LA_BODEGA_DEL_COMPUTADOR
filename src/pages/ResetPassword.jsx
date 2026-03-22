@@ -6,7 +6,7 @@ import { Lock, Eye, EyeOff, CheckCircle } from 'lucide-react';
 
 const ResetPassword = () => {
     const [searchParams] = useSearchParams();
-    const navigate = useNavigate();
+    const _navigate = useNavigate();
     const token = searchParams.get('token');
 
     const [password, setPassword] = useState('');

@@ -11,7 +11,7 @@ export const ShopProvider = ({ children }) => {
         const savedCart = localStorage.getItem('cart');
         return savedCart ? JSON.parse(savedCart) : [];
     });
-    const [user, setUser] = useState(null); // Mock user state
+    const [user, _setUser] = useState(null); // Mock user state
 
     // Load products from persistent service
     const loadProducts = async () => {
