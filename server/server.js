@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { db } from './db.js';
+import { db, dbPath } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
@@ -32,6 +32,8 @@ import * as couponRoutes from './couponRoutes.js';
 import * as employeeRoutes from './employeeRoutes.js';
 import * as returnRoutes from './returnRoutes.js';
 import * as expenseRoutes from './expenseRoutes.js';
+import * as exportRoutes from './exportRoutes.js';
+import * as auditRoutes from './auditRoutes.js';
 import webhookRoutes from './webhooks.js';
 
 dotenv.config();
@@ -52,7 +54,8 @@ const PORT = process.env.PORT || 3000;
 // Security Middleware
 app.set('trust proxy', 1); // Trust first proxy (e.g. Hostinger, Cloudflare)
 app.use(helmet({
-    crossOriginResourcePolicy: false, // Required for displaying local images
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+    crossOriginEmbedderPolicy: false,
 }));
 
 const limiter = rateLimit({
@@ -542,7 +545,13 @@ app.put('/api/products/:id', authenticateToken, requireRole(['admin', 'vendedor'
 
 // Get All Tickets
 app.get('/api/tickets', authenticateToken, requireRole(['admin', 'técnico', 'vendedor']), (req, res) => {
-    db.all('SELECT * FROM tickets ORDER BY id DESC', [], (err, rows) => {
+    const query = `
+        SELECT t.*, u.name as assignedToName 
+        FROM tickets t 
+        LEFT JOIN users u ON t.assignedTo = u.id 
+        ORDER BY t.id DESC
+    `;
+    db.all(query, [], (err, rows) => {
         if (err) {
             res.status(500).json({ error: err.message });
             return;
@@ -560,9 +569,9 @@ app.get('/api/tickets', authenticateToken, requireRole(['admin', 'técnico', 've
 
 // Create Ticket (Intake)
 app.post('/api/tickets', authenticateToken, requireRole(['admin', 'técnico', 'vendedor']), (req, res) => {
-    const { clientName, clientPhone, deviceType, brand, model, serial, issueDescription } = req.body;
-    const sql = `INSERT INTO tickets (clientName, clientPhone, deviceType, brand, model, serial, issueDescription, status, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?)`;
-    const params = [clientName, clientPhone, deviceType, brand, model, serial, issueDescription, new Date().toISOString()];
+    const { clientName, clientPhone, deviceType, brand, model, serial, issueDescription, assignedTo } = req.body;
+    const sql = `INSERT INTO tickets (clientName, clientPhone, deviceType, brand, model, serial, issueDescription, status, assignedTo, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED', ?, ?)`;
+    const params = [clientName, clientPhone, deviceType, brand, model, serial, issueDescription, assignedTo || null, new Date().toISOString()];
 
     db.run(sql, params, function (err) {
         if (err) {
@@ -574,44 +583,82 @@ app.post('/api/tickets', authenticateToken, requireRole(['admin', 'técnico', 'v
 });
 
 // Update Ticket (Diagnosis, Status, Approval) - Admin/Tech Service Only
-app.put('/api/tickets/:id', authenticateToken, requireRole(['admin', 'técnico']), (req, res) => {
-    const { status, diagnosis, estimatedCost, technicianNotes, approvedByClient } = req.body;
+app.put('/api/tickets/:id', authenticateToken, requireRole(['admin', 'técnico', 'vendedor']), (req, res) => {
+    const { status, diagnosis, estimatedCost, technicianNotes, approvedByClient, assignedTo } = req.body;
 
-    // Dynamic Update Query
-    let updates = [];
-    let params = [];
+    // First fetch old ticket to evaluate status shifts
+    db.get('SELECT status, quoteItems FROM tickets WHERE id = ?', [req.params.id], async (err, oldTicket) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!oldTicket) return res.status(404).json({ error: 'Ticket not found' });
 
-    if (status) { updates.push('status = ?'); params.push(status); }
-    if (diagnosis) { updates.push('diagnosis = ?'); params.push(diagnosis); }
-    if (estimatedCost) { updates.push('estimatedCost = ?'); params.push(estimatedCost); }
-    if (technicianNotes) { updates.push('technicianNotes = ?'); params.push(technicianNotes); }
-    if (req.body.quoteItems) { updates.push('quoteItems = ?'); params.push(JSON.stringify(req.body.quoteItems)); }
-    if (req.body.photosIntake) { updates.push('photosIntake = ?'); params.push(JSON.stringify(req.body.photosIntake)); }
-    if (approvedByClient !== undefined) { updates.push('approvedByClient = ?'); params.push(approvedByClient ? 1 : 0); }
+        // Evaluate Inventory Deduction
+        // If transitioning into REPAIRING (or READY directly) and wasn't before, we deduct components.
+        const shouldDeduct = status && 
+                             !['REPAIRING', 'READY', 'DELIVERED'].includes(oldTicket.status) && 
+                             ['REPAIRING', 'READY', 'DELIVERED'].includes(status);
 
-    updates.push('updatedAt = ?'); params.push(new Date().toISOString());
-    params.push(req.params.id);
+        let parsedQuoteItems = [];
+        try {
+            // Prefer incoming quoteItems, fallback to ones already saved
+            parsedQuoteItems = req.body.quoteItems || (oldTicket.quoteItems ? JSON.parse(oldTicket.quoteItems) : []);
+        } catch(e) {}
 
-    const sql = `UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`;
-
-    db.run(sql, params, function (err) {
-        if (err) {
-            res.status(400).json({ error: err.message });
-            return;
-        }
-
-        // Send email notification if status changed
-        if (status && ['DIAGNOSED', 'REPAIRING', 'READY', 'DELIVERED'].includes(status)) {
-            db.get('SELECT * FROM tickets WHERE id = ?', [req.params.id], (err, ticket) => {
-                if (!err && ticket) {
-                    sendTicketNotification(ticket, status).catch(console.error);
+        if (shouldDeduct && parsedQuoteItems.length > 0) {
+            // Pre-check stock (MySQL y SQLite validación lógica)
+            for (let item of parsedQuoteItems) {
+                const prod = await new Promise((resolve) => {
+                    db.get('SELECT stock FROM products WHERE id = ?', [item.id], (_, row) => resolve(row));
+                });
+                if (!prod || prod.stock < item.quantity) {
+                    return res.status(400).json({ error: `Inventario insuficiente para el repuesto: ${item.name}` });
                 }
-            });
+            }
+
+            // Deduct stock
+            for (let item of parsedQuoteItems) {
+                await new Promise((resolve) => {
+                    db.run('UPDATE products SET stock = stock - ? WHERE id = ?', [item.quantity, item.id], resolve);
+                });
+            }
         }
 
-        res.json({ success: true });
-    });
-});
+        // Proceed to update the ticket
+        let updates = [];
+        let params = [];
+
+        if (status) { updates.push('status = ?'); params.push(status); }
+        if (diagnosis) { updates.push('diagnosis = ?'); params.push(diagnosis); }
+        if (estimatedCost !== undefined) { updates.push('estimatedCost = ?'); params.push(estimatedCost); }
+        if (technicianNotes !== undefined) { updates.push('technicianNotes = ?'); params.push(technicianNotes); }
+        if (req.body.quoteItems) { updates.push('quoteItems = ?'); params.push(JSON.stringify(req.body.quoteItems)); }
+        if (req.body.photosIntake) { updates.push('photosIntake = ?'); params.push(JSON.stringify(req.body.photosIntake)); }
+        if (approvedByClient !== undefined) { updates.push('approvedByClient = ?'); params.push(approvedByClient ? 1 : 0); }
+        if (assignedTo !== undefined) { updates.push('assignedTo = ?'); params.push(assignedTo || null); }
+
+        updates.push('updatedAt = ?'); params.push(new Date().toISOString());
+        params.push(req.params.id);
+
+        const sql = `UPDATE tickets SET ${updates.join(', ')} WHERE id = ?`;
+
+        db.run(sql, params, function (err) {
+            if (err) {
+                res.status(400).json({ error: err.message });
+                return;
+            }
+
+            // Send email notification if status changed
+            if (status && ['DIAGNOSED', 'REPAIRING', 'READY', 'DELIVERED'].includes(status) && status !== oldTicket.status) {
+                db.get('SELECT * FROM tickets WHERE id = ?', [req.params.id], (err, ticket) => {
+                    if (!err && ticket) {
+                        sendTicketNotification(ticket, status).catch(console.error);
+                    }
+                });
+            }
+
+            res.json({ success: true });
+        });
+    }); // Closes db.get
+}); // Closes app.put
 
 // Delete Product (Admin only)
 app.delete('/api/products/:id', authenticateToken, requireAdmin, (req, res) => {
@@ -625,6 +672,14 @@ app.delete('/api/products/:id', authenticateToken, requireAdmin, (req, res) => {
 });
 
 // --- USER MANAGEMENT ROUTES ---
+// Get only technicians (for ticket assignment, accessible by anyone handling tickets)
+app.get('/api/technicians', authenticateToken, requireRole(['admin', 'técnico', 'vendedor']), (req, res) => {
+    db.all('SELECT id, name, email FROM users WHERE role = ?', ['técnico'], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+});
+
 app.get('/api/users', authenticateToken, requireAdmin, userRoutes.getUsers);
 app.get('/api/users/:id', authenticateToken, requireAdmin, userRoutes.getUser);
 app.post('/api/users', authenticateToken, requireAdmin, userRoutes.createUser);
@@ -656,11 +711,11 @@ app.put('/api/customers/:id', authenticateToken, requireRole(['admin', 'vendedor
 app.delete('/api/customers/:id', authenticateToken, requireAdmin, customerRoutes.deleteCustomer);
 
 // --- APPOINTMENT MANAGEMENT ROUTES ---
-app.get('/api/appointments', authenticateToken, appointmentRoutes.getAppointments);
-app.get('/api/appointments/range', authenticateToken, appointmentRoutes.getAppointmentsByDateRange);
-app.get('/api/appointments/:id', authenticateToken, appointmentRoutes.getAppointment);
-app.post('/api/appointments', authenticateToken, appointmentRoutes.createAppointment);
-app.put('/api/appointments/:id', authenticateToken, appointmentRoutes.updateAppointment);
+app.get('/api/appointments', authenticateToken, requireRole(['admin', 'vendedor', 'técnico', 'gerente']), appointmentRoutes.getAppointments);
+app.get('/api/appointments/range', authenticateToken, requireRole(['admin', 'vendedor', 'técnico', 'gerente']), appointmentRoutes.getAppointmentsByDateRange);
+app.get('/api/appointments/:id', authenticateToken, requireRole(['admin', 'vendedor', 'técnico', 'gerente']), appointmentRoutes.getAppointment);
+app.post('/api/appointments', authenticateToken, requireRole(['admin', 'vendedor', 'técnico', 'gerente']), appointmentRoutes.createAppointment);
+app.put('/api/appointments/:id', authenticateToken, requireRole(['admin', 'vendedor', 'técnico', 'gerente']), appointmentRoutes.updateAppointment);
 app.delete('/api/appointments/:id', authenticateToken, requireAdmin, appointmentRoutes.deleteAppointment);
 
 // --- NOTIFICATION ROUTES ---
@@ -746,6 +801,7 @@ app.get('/api/orders/track/:orderNumber', orderRoutes.trackOrder);
 app.get('/api/orders/:id', authenticateToken, orderRoutes.getOrder);
 app.post('/api/orders', orderRoutes.createOrder); // Public for checkout (or authenticate if user logged in)
 app.put('/api/orders/:id/status', authenticateToken, requireAdmin, orderRoutes.updateOrderStatus);
+app.put('/api/orders/:id/cancel', authenticateToken, orderRoutes.cancelOrder);
 
 // --- CATALOG ROUTES (For WhatsApp/n8n) ---
 app.get('/api/catalog/whatsapp', catalogRoutes.getWhatsAppCatalog);
@@ -759,6 +815,39 @@ app.get('/api/automation/inventory-alerts', authenticateToken, automationRoutes.
 // --- CMS SETTINGS ROUTES ---
 app.get('/api/settings', settingsRoutes.getSettings);
 app.put('/api/settings', authenticateToken, requireAdmin, settingsRoutes.updateSettings);
+
+import { db, dbPath, logActivity } from './db.js';
+
+// ... (existing code)
+
+// --- ADMIN TOOLS ---
+app.get('/api/admin/backup-db', authenticateToken, requireAdmin, (req, res) => {
+    if (dbPath) {
+        logActivity({
+            userId: req.user.id,
+            action: 'DOWNLOAD_BACKUP',
+            module: 'ADMIN',
+            details: 'Descarga de base de datos SQLite solicitada',
+            req: req
+        });
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const filename = `backup_lbdc_${timestamp}.sqlite`;
+        res.download(dbPath, filename);
+    } else {
+        logActivity({
+            userId: req.user.id,
+            action: 'DOWNLOAD_BACKUP_FAILED',
+            module: 'ADMIN',
+            details: 'Intento de descarga de backup fallido (No SQLite)',
+            req: req
+        });
+        res.status(400).json({ 
+            error: 'La base de datos actual no es SQLite o no soporta descarga directa.',
+            details: 'Si estás usando MySQL, por favor exporta los datos directamente desde el panel de control del hosting.'
+        });
+    }
+});
+
 
 // --- SUPPLIER ROUTES ---
 app.get('/api/suppliers', authenticateToken, supplierRoutes.getSuppliers);
@@ -783,19 +872,34 @@ app.put('/api/employees/:id', authenticateToken, requireAdmin, employeeRoutes.up
 app.delete('/api/employees/:id', authenticateToken, requireAdmin, employeeRoutes.deleteEmployee);
 
 // --- RETURN (RMA) ROUTES ---
-app.get('/api/returns', authenticateToken, returnRoutes.getReturns);
-app.get('/api/returns/:id', authenticateToken, returnRoutes.getReturn);
-app.post('/api/returns', authenticateToken, returnRoutes.createReturn);
-app.put('/api/returns/:id/status', authenticateToken, returnRoutes.updateReturnStatus);
+app.get('/api/returns', authenticateToken, requireRole(['admin', 'vendedor', 'gerente']), returnRoutes.getReturns);
+app.get('/api/returns/:id', authenticateToken, requireRole(['admin', 'vendedor', 'gerente']), returnRoutes.getReturn);
+app.post('/api/returns', authenticateToken, requireRole(['admin', 'vendedor', 'gerente']), returnRoutes.createReturn);
+app.put('/api/returns/:id/status', authenticateToken, requireRole(['admin', 'vendedor', 'gerente']), returnRoutes.updateReturnStatus);
 app.delete('/api/returns/:id', authenticateToken, requireAdmin, returnRoutes.deleteReturn);
 
 // --- EXPENSE ROUTES ---
-app.get('/api/expenses', authenticateToken, expenseRoutes.getExpenses);
-app.get('/api/expenses/summary', authenticateToken, expenseRoutes.getExpenseSummary);
-app.get('/api/expenses/:id', authenticateToken, expenseRoutes.getExpense);
-app.post('/api/expenses', authenticateToken, expenseRoutes.createExpense);
-app.put('/api/expenses/:id', authenticateToken, expenseRoutes.updateExpense);
+app.get('/api/expenses', authenticateToken, requireRole(['admin', 'gerente', 'finanzas']), expenseRoutes.getExpenses);
+app.get('/api/expenses/summary', authenticateToken, requireRole(['admin', 'gerente', 'finanzas']), expenseRoutes.getExpenseSummary);
+app.get('/api/expenses/:id', authenticateToken, requireRole(['admin', 'gerente', 'finanzas']), expenseRoutes.getExpense);
+app.post('/api/expenses', authenticateToken, requireRole(['admin', 'gerente', 'finanzas']), expenseRoutes.createExpense);
+app.put('/api/expenses/:id', authenticateToken, requireRole(['admin', 'gerente', 'finanzas']), expenseRoutes.updateExpense);
 app.delete('/api/expenses/:id', authenticateToken, requireAdmin, expenseRoutes.deleteExpense);
+
+// --- EXPORT ROUTES ---
+app.get('/api/export/customers', authenticateToken, requireRole(['admin', 'vendedor']), exportRoutes.exportCustomersToExcel);
+app.get('/api/export/products', authenticateToken, requireRole(['admin', 'vendedor']), exportRoutes.exportProductsToExcel);
+app.get('/api/export/orders', authenticateToken, requireRole(['admin', 'vendedor']), exportRoutes.exportOrdersToExcel);
+app.get('/api/export/tickets', authenticateToken, requireRole(['admin', 'técnico', 'vendedor']), exportRoutes.exportTicketsToExcel);
+app.get('/api/export/expenses', authenticateToken, requireRole(['admin']), exportRoutes.exportExpensesToExcel);
+app.get('/api/export/pdf/report', authenticateToken, requireRole(['admin']), exportRoutes.generatePDFReport);
+
+// --- AUDIT ROUTES ---
+app.get('/api/audit/logs', authenticateToken, requireAdmin, auditRoutes.getAuditLogs);
+app.get('/api/audit/stats', authenticateToken, requireAdmin, auditRoutes.getAuditStats);
+app.get('/api/audit/activity/recent', authenticateToken, requireAdmin, auditRoutes.getRecentActivity);
+app.get('/api/audit/activity/user/:userId', authenticateToken, requireAdmin, auditRoutes.getUserActivity);
+app.get('/api/audit/export', authenticateToken, requireAdmin, auditRoutes.exportAuditLogs);
 
 // --- n8n WEBHOOK ROUTES ---
 app.use('/webhooks', webhookRoutes);

@@ -57,5 +57,20 @@ export const ticketService = {
         return new Promise(resolve => {
             setTimeout(() => resolve({ success: true }), 1000);
         });
+    },
+
+    getTechnicians: async () => {
+        try {
+            const response = await fetch(`${API_URL}/technicians`, {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                }
+            });
+            if (!response.ok) throw new Error('Failed to fetch technicians');
+            return await response.json();
+        } catch (error) {
+            console.error(error);
+            return [];
+        }
     }
 };

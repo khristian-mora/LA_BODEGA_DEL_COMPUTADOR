@@ -212,8 +212,8 @@ const AdminInventory = () => {
                                     </td>
                                     <td className="p-4">
                                         <div className="flex items-center gap-2">
-                                            <div className={`w-2 h-2 rounded-full ${product.stock > 5 ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                                            <span className="text-sm text-gray-700">{product.stock || '12'} un.</span>
+                                            <div className={`w-2 h-2 rounded-full ${product.stock > (product.minStock || 5) ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                            <span className="text-sm text-gray-700">{product.stock || '0'} un.</span>
                                         </div>
                                     </td>
                                     <td className="p-4 text-right pr-6">

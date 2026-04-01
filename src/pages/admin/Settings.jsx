@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
-import { Settings, Save, Building2, Mail, Phone, MapPin, Globe, ShieldCheck, Lock, Image, Upload, X, Monitor, MonitorSpeaker } from 'lucide-react';
+import { Settings, Save, Building2, Mail, Phone, MapPin, Globe, ShieldCheck, Lock, Image, Upload, X, Monitor, MonitorSpeaker, Database, Download } from 'lucide-react';
 import Button from '../../components/Button';
 import TwoFactorModal from '../../components/TwoFactorModal';
 import { settingsService } from '../../services/settingsService';
@@ -36,6 +36,26 @@ const AdminSettings = () => {
     const [is2FAModalOpen, setIs2FAModalOpen] = useState(false);
     const heroInputRef = useRef(null);
     const bannerInputRef = useRef(null);
+
+    const handleDownloadBackup = async () => {
+        try {
+            setUploading(true);
+            await settingsService.downloadDatabaseBackup();
+            showAlert({
+                title: 'Respaldo Generado',
+                message: 'Se ha descargado una copia completa de la base de datos satisfactoriamente.',
+                type: 'success'
+            });
+        } catch (error) {
+            showAlert({
+                title: 'Error de Respaldo',
+                message: error.message,
+                type: 'error'
+            });
+        } finally {
+            setUploading(false);
+        }
+    };
 
     const handleSave = async () => {
         try {
@@ -302,7 +322,7 @@ const AdminSettings = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                            <label className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                                 <Mail className="w-4 h-4" /> Email
                             </label>
                             <input
@@ -313,7 +333,7 @@ const AdminSettings = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                            <label className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                                 <Phone className="w-4 h-4" /> Teléfono / WhatsApp
                             </label>
                             <input
@@ -324,7 +344,7 @@ const AdminSettings = () => {
                             />
                         </div>
                         <div className="col-span-2">
-                            <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                            <label className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
                                 <MapPin className="w-4 h-4" /> Dirección
                             </label>
                             <input
@@ -462,6 +482,41 @@ const AdminSettings = () => {
                     isOpen={is2FAModalOpen}
                     onClose={() => setIs2FAModalOpen(false)}
                 />
+
+                {/* Maintenance & Backup */}
+                <div className="bg-white rounded-xl border border-red-100 shadow-sm overflow-hidden">
+                    <div className="border-b border-red-50 p-4 bg-red-50/30">
+                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
+                            <Database className="w-5 h-5 text-red-600" />
+                            Mantenimiento y Respaldo
+                        </h3>
+                    </div>
+                    <div className="p-6">
+                        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 bg-white border border-gray-100 rounded-xl">
+                            <div className="flex items-center gap-4">
+                                <div className="bg-gray-100 p-3 rounded-lg text-gray-600">
+                                    <Download className="w-6 h-6" />
+                                </div>
+                                <div className="max-w-md">
+                                    <p className="font-bold text-gray-900">Respaldar Toda la Base de Datos</p>
+                                    <p className="text-sm text-gray-500">
+                                        Descarga una copia completa de la base de datos actual en formato SQLite. 
+                                        Usa este archivo para realizar migraciones o guardar copias de seguridad externas.
+                                    </p>
+                                </div>
+                            </div>
+                            <Button 
+                                variant="outline" 
+                                onClick={handleDownloadBackup} 
+                                disabled={uploading}
+                                className="flex items-center gap-2 border-gray-200 hover:bg-gray-50"
+                            >
+                                <Download className="w-4 h-4" /> 
+                                {uploading ? 'Procesando...' : 'Descargar Backup'}
+                            </Button>
+                        </div>
+                    </div>
+                </div>
 
             </div>
         </AdminLayout>

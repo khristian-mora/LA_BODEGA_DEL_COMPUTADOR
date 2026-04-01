@@ -102,7 +102,7 @@ const Support = () => {
                             />
                             <FaqItem
                                 question="¿Puedo recoger mi pedido en la tienda?"
-                                answer="Sí, puedes seleccionar la opción 'Recoger en Tienda' al finalizar tu compra y pasar por nuestra sede principal en Bogotá sin costo."
+                                answer="Sí, puedes seleccionar la opción 'Recoger en Tienda' al finalizar tu compra y pasar por nuestra sede principal en Barrancabermeja sin costo."
                             />
                         </div>
 

@@ -1,7 +1,6 @@
 import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
-
 import mysql from 'mysql2';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -9,6 +8,7 @@ const __dirname = path.dirname(__filename);
 
 // Database Interface Wrapper
 let db;
+let dbPath;
 
 if (process.env.DB_HOST) {
     console.log('[DB] Using MySQL connection');
@@ -71,7 +71,7 @@ if (process.env.DB_HOST) {
 
 } else {
     // SQLite Fallback (Original Code)
-    const dbPath = path.resolve(__dirname, 'database.sqlite');
+    dbPath = path.resolve(__dirname, 'database.sqlite');
     console.log(`[DB] Using SQLite database at: ${dbPath}`);
     db = new sqlite3.Database(dbPath, (err) => {
         if (err) {
@@ -83,11 +83,64 @@ if (process.env.DB_HOST) {
     });
 }
 
-export { db };
+/**
+ * Redact sensitive fields from an object or JSON string
+ */
+const redactSensitive = (data) => {
+    if (!data) return null;
+    const sensitiveFields = ['password', 'token', 'secret', 'twoFactorSecret', 'resetToken', 'authCode'];
+    
+    try {
+        let obj = typeof data === 'string' ? JSON.parse(data) : { ...data };
+        let modified = false;
+
+        Object.keys(obj).forEach(key => {
+            if (sensitiveFields.some(field => key.toLowerCase().includes(field.toLowerCase()))) {
+                obj[key] = '[REDACTED]';
+                modified = true;
+            }
+        });
+
+        return modified ? JSON.stringify(obj) : (typeof data === 'string' ? data : JSON.stringify(data));
+    } catch (e) {
+        // If not JSON, return as is (but usually these are objects)
+        return typeof data === 'string' ? data : JSON.stringify(data);
+    }
+};
+
+/**
+ * Centraralized Audit Logging
+ * @param {Object} data - { userId, action, module, entityType, entityId, oldValue, newValue, req }
+ */
+export const logActivity = (data) => {
+    const { userId, action, module, entityType, entityId, oldValue, newValue, req } = data;
+    const ipAddress = req?.ip || (req?.headers ? (req?.headers['x-forwarded-for'] || 'unknown') : 'unknown');
+    const userAgent = req?.headers ? (req?.headers['user-agent'] || 'unknown') : 'unknown';
+    const timestamp = new Date().toISOString();
+
+    const sql = `INSERT INTO audit_logs (userId, action, module, entityType, entityId, oldValue, newValue, ipAddress, userAgent, timestamp) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+    
+    db.run(sql, [
+        userId || 0, 
+        action, 
+        module || null, 
+        entityType || null, 
+        entityId || null, 
+        redactSensitive(oldValue), 
+        redactSensitive(newValue), 
+        ipAddress, 
+        userAgent, 
+        timestamp
+    ], (err) => {
+        if (err) console.error('[AUDIT] Failed to log activity:', err.message);
+    });
+};
+
+export { db, dbPath };
 
 function initDb() {
     db.serialize(() => {
-
 
         db.run(`CREATE TABLE IF NOT EXISTS products(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,9 +174,15 @@ function initDb() {
         approvedByClient INTEGER DEFAULT 0,
         findings TEXT,
         recommendations TEXT,
+        assignedTo INTEGER,
         createdAt TEXT,
         updatedAt TEXT
-    )`);
+    )`, (err) => {
+            if (!err) {
+                // Ignore error if column already exists (migration safety)
+                db.run('ALTER TABLE tickets ADD COLUMN assignedTo INTEGER', () => {});
+            }
+        });
 
         db.run(`CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -320,6 +379,54 @@ function initDb() {
         updatedAt TEXT
     )`);
 
+        // Employee Attendance
+        db.run(`CREATE TABLE IF NOT EXISTS attendance(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        checkIn TEXT,
+        checkOut TEXT,
+        status TEXT DEFAULT 'present',
+        notes TEXT,
+        createdAt TEXT,
+        FOREIGN KEY (employeeId) REFERENCES employees(id)
+    )`);
+
+        // Employee Leave Requests
+        db.run(`CREATE TABLE IF NOT EXISTS leave(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        leaveType TEXT NOT NULL,
+        startDate TEXT NOT NULL,
+        endDate TEXT NOT NULL,
+        reason TEXT,
+        status TEXT DEFAULT 'pending',
+        approvedBy INTEGER,
+        approvedAt TEXT,
+        notes TEXT,
+        createdAt TEXT,
+        FOREIGN KEY (employeeId) REFERENCES employees(id),
+        FOREIGN KEY (approvedBy) REFERENCES users(id)
+    )`);
+
+        // Employee Evaluations
+        db.run(`CREATE TABLE IF NOT EXISTS evaluations(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employeeId INTEGER NOT NULL,
+        evaluatorId INTEGER NOT NULL,
+        period TEXT,
+        score INTEGER,
+        strengths TEXT,
+        improvements TEXT,
+        goals TEXT,
+        comments TEXT,
+        status TEXT DEFAULT 'draft',
+        createdAt TEXT,
+        updatedAt TEXT,
+        FOREIGN KEY (employeeId) REFERENCES employees(id),
+        FOREIGN KEY (evaluatorId) REFERENCES users(id)
+    )`);
+
         // Returns (RMA)
         db.run(`CREATE TABLE IF NOT EXISTS returns(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -352,5 +459,21 @@ function initDb() {
         createdAt TEXT
     )`);
 
+        // Audit Logs (for comprehensive audit system)
+        db.run(`CREATE TABLE IF NOT EXISTS audit_logs(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        userId INTEGER,
+        action TEXT NOT NULL,
+        module TEXT,
+        entityType TEXT,
+        entityId INTEGER,
+        oldValue TEXT,
+        newValue TEXT,
+        ipAddress TEXT,
+        userAgent TEXT,
+        timestamp TEXT NOT NULL,
+        FOREIGN KEY (userId) REFERENCES users(id)
+    )`);
+
     });
-};
+}

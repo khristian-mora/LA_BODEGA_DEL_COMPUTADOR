@@ -1,14 +1,6 @@
 // User Management Endpoints
-import { db } from './db.js';
+import { db, logActivity } from './db.js';
 import bcrypt from 'bcryptjs';
-
-// Log user activity
-export const logActivity = (userId, action, module, details = '') => {
-    db.run(
-        'INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)',
-        [userId, action, module, details, new Date().toISOString()]
-    );
-};
 
 // Get all users
 export const getUsers = (req, res) => {
@@ -60,7 +52,13 @@ export const publicRegister = async (req, res) => {
                 return;
             }
 
-            // Auto-login logic could go here, but for now just return success
+            logActivity({
+                userId: 0, // Public register
+                action: 'CLIENT_REGISTER',
+                module: 'AUTH',
+                details: `Nuevo cliente registrado: ${name}`,
+                req: req
+            });
             res.json({ success: true, message: 'Registro exitoso' });
         });
     } catch (error) {
@@ -91,7 +89,15 @@ export const createUser = async (req, res) => {
                 return;
             }
 
-            logActivity(req.user.id, 'CREATE_USER', 'users', `Created user: ${name}`);
+            logActivity({
+                userId: req.user.id,
+                action: 'CREATE_USER',
+                module: 'USERS',
+                entityType: 'users',
+                entityId: this.lastID,
+                newValue: { name, email, role },
+                req: req
+            });
             res.json({ id: this.lastID, name, email, role });
         });
     } catch (error) {
@@ -103,33 +109,48 @@ export const createUser = async (req, res) => {
 export const updateUser = async (req, res) => {
     const { name, email, role, status, password } = req.body;
 
-    let updates = [];
-    let params = [];
-
-    if (name) { updates.push('name = ?'); params.push(name); }
-    if (email) { updates.push('email = ?'); params.push(email); }
-    if (role) { updates.push('role = ?'); params.push(role); }
-    if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-
-    // Update password if provided
-    if (password) {
-        const hashedPassword = await bcrypt.hash(password, 10);
-        updates.push('password = ?');
-        params.push(hashedPassword);
-    }
-
-    params.push(req.params.id);
-
-    const sql = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
-
-    db.run(sql, params, function (err) {
-        if (err) {
-            res.status(400).json({ error: err.message });
-            return;
+    // Get old value for audit trail
+    db.get('SELECT * FROM users WHERE id = ?', [req.params.id], async (err, oldUser) => {
+        if (err || !oldUser) {
+            return res.status(404).json({ error: 'Usuario no encontrado' });
         }
 
-        logActivity(req.user.id, 'UPDATE_USER', 'users', `Updated user ID: ${req.params.id}`);
-        res.json({ success: true });
+        let updates = [];
+        let params = [];
+
+        if (name) { updates.push('name = ?'); params.push(name); }
+        if (email) { updates.push('email = ?'); params.push(email); }
+        if (role) { updates.push('role = ?'); params.push(role); }
+        if (status !== undefined) { updates.push('status = ?'); params.push(status); }
+
+        if (password) {
+            const hashedPassword = await bcrypt.hash(password, 10);
+            updates.push('password = ?');
+            params.push(hashedPassword);
+        }
+
+        params.push(req.params.id);
+
+        const sql = `UPDATE users SET ${updates.join(', ')} WHERE id = ?`;
+
+        db.run(sql, params, function (err) {
+            if (err) {
+                res.status(400).json({ error: err.message });
+                return;
+            }
+
+            logActivity({
+                userId: req.user.id,
+                action: 'UPDATE_USER',
+                module: 'USERS',
+                entityType: 'users',
+                entityId: req.params.id,
+                oldValue: { name: oldUser.name, role: oldUser.role, status: oldUser.status },
+                newValue: { name, role, status },
+                req: req
+            });
+            res.json({ success: true });
+        });
     });
 };
 
@@ -142,7 +163,14 @@ export const deleteUser = (req, res) => {
             return;
         }
 
-        logActivity(req.user.id, 'DELETE_USER', 'users', `Deactivated user ID: ${req.params.id}`);
+        logActivity({
+            userId: req.user.id,
+            action: 'DEACTIVATE_USER',
+            module: 'USERS',
+            entityType: 'users',
+            entityId: req.params.id,
+            req: req
+        });
         res.json({ success: true });
     });
 };
@@ -150,11 +178,13 @@ export const deleteUser = (req, res) => {
 // Get user activity log
 export const getUserActivity = (req, res) => {
     const limit = req.query.limit || 50;
+    // Note: We'll keep query against user_activity_log for now but audit_logs is the new one.
+    // Eventually migrate front-end to call a unified audit log.
     db.all(
-        `SELECT ual.*, u.name as username 
-         FROM user_activity_log ual 
-         LEFT JOIN users u ON ual.userId = u.id 
-         ORDER BY ual.timestamp DESC 
+        `SELECT al.*, u.name as username 
+         FROM audit_logs al 
+         LEFT JOIN users u ON al.userId = u.id 
+         ORDER BY al.timestamp DESC 
          LIMIT ?`,
         [limit],
         (err, rows) => {

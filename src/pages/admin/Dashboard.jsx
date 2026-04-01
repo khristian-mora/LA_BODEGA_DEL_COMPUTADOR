@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
+import { useNavigate } from 'react-router-dom';
 import { DollarSign, ShoppingBag, Clock, TrendingUp, Users, UserCircle, Wrench, Package, AlertTriangle, CheckCircle } from 'lucide-react';
 import { buildApiUrl } from '../../config/config';
 
@@ -28,6 +29,9 @@ const DashboardCard = ({ title, value, subtext, icon, color, trend }) => {
 };
 
 const AdminDashboard = () => {
+    const navigate = useNavigate();
+    const userRole = JSON.parse(localStorage.getItem('adminUser') || '{}').role;
+
     const [stats, setStats] = useState({
         users: 0,
         customers: 0,
@@ -42,8 +46,12 @@ const AdminDashboard = () => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
+        if (userRole === 'técnico') {
+            navigate('/admin/tech-service');
+            return;
+        }
         fetchDashboardData();
-    }, []);
+    }, [userRole, navigate]);
 
     const fetchDashboardData = async () => {
         try {

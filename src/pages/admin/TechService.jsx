@@ -88,6 +88,7 @@ const AdminTechService = () => {
     const [isAdmin, setIsAdmin] = useState(false); // Track if user is admin
     const [editingPhoto, setEditingPhoto] = useState(null); // URL of photo being edited
     const [searchTerm, setSearchTerm] = useState('');
+    const [technicians, setTechnicians] = useState([]);
 
     // Check user role on mount
     useEffect(() => {
@@ -106,7 +107,7 @@ const AdminTechService = () => {
     // Intake Form State
     const [formData, setFormData] = useState({
         clientName: '', clientPhone: '', deviceType: 'Laptop',
-        brand: '', model: '', serial: '', issueDescription: '', photosIntake: []
+        brand: '', model: '', serial: '', issueDescription: '', photosIntake: [], assignedTo: ''
     });
 
     const fileInputRef = useRef(null);
@@ -135,12 +136,18 @@ const AdminTechService = () => {
 
     useEffect(() => {
         fetchTickets();
+        fetchTechnicians();
     }, []);
 
     const fetchTickets = async () => {
         const data = await ticketService.getTickets();
         setTickets(data);
         setLoading(false);
+    };
+
+    const fetchTechnicians = async () => {
+        const techs = await ticketService.getTechnicians();
+        setTechnicians(techs);
     };
 
     const handleCreate = async (e) => {
@@ -185,7 +192,7 @@ const AdminTechService = () => {
 
             setFormData({
                 clientName: '', clientPhone: '', deviceType: 'Laptop',
-                brand: '', model: '', serial: '', issueDescription: '', photosIntake: [], pendingFiles: []
+                brand: '', model: '', serial: '', issueDescription: '', photosIntake: [], pendingFiles: [], assignedTo: ''
             });
             setShowForm(false);
             await fetchTickets();
@@ -441,6 +448,27 @@ const AdminTechService = () => {
         }
     };
 
+    const handleAssignTech = async (ticketId, techId) => {
+        try {
+            await ticketService.updateTicket(ticketId, { assignedTo: techId });
+            logAction('ASSIGN_TECH', 'Taller', `Asignó ticket #${ticketId} al técnico ${techId}`);
+            setSelectedTicket(prev => ({ ...prev, assignedTo: techId }));
+            fetchTickets();
+            showAlert({
+                title: 'Asignación Actualizada',
+                message: 'Técnico asignado exitosamente',
+                type: 'success'
+            });
+        } catch (error) {
+            console.error(error);
+            showAlert({
+                title: 'Error',
+                message: 'No se pudo asignar el técnico.',
+                type: 'error'
+            });
+        }
+    };
+
     const toggleItem = (listName, item) => {
         setDiagnosisData(prev => {
             const list = prev[listName];
@@ -546,6 +574,11 @@ const AdminTechService = () => {
                                             <td className="p-4 font-medium text-gray-900">
                                                 {ticket.clientName}
                                                 <div className="text-xs text-gray-400 font-normal">{ticket.clientPhone}</div>
+                                                {ticket.assignedTo && technicians.length > 0 && (
+                                                    <div className="mt-1 flex items-center gap-1 text-[10px] text-indigo-600 font-bold bg-indigo-50 w-max px-1.5 py-0.5 rounded">
+                                                        <PenTool className="w-3 h-3" /> {technicians.find(t => t.id === parseInt(ticket.assignedTo))?.name || 'Técnico'}
+                                                    </div>
+                                                )}
                                             </td>
                                             <td className="p-4 text-gray-600">{ticket.deviceType} {ticket.brand}</td>
                                             <td className="p-4"><StatusBadge status={ticket.status} /></td>
@@ -584,6 +617,13 @@ const AdminTechService = () => {
                                         <div className="flex justify-between mb-1"><span className="text-xs font-bold text-gray-500">#{ticket.id}</span><span className="text-xs text-gray-400">{new Date(ticket.createdAt).toLocaleDateString()}</span></div>
                                         <h4 className="font-bold text-sm">{ticket.deviceType} {ticket.brand}</h4>
                                         <p className="text-xs text-gray-500 mb-2">{ticket.clientName}</p>
+                                        
+                                        {ticket.assignedTo && technicians.length > 0 && (
+                                            <div className="mb-2 flex items-center gap-1 text-[10px] text-indigo-600 font-bold bg-indigo-50 w-max px-1.5 py-0.5 rounded">
+                                                <PenTool className="w-3 h-3" /> {technicians.find(t => t.id === parseInt(ticket.assignedTo))?.name || 'Técnico'}
+                                            </div>
+                                        )}
+
                                         <div className="mt-2 pt-2 border-t border-gray-50 flex justify-end">
                                             <span className="text-xs font-bold text-blue-600">Diagnosticar →</span>
                                         </div>
@@ -604,6 +644,13 @@ const AdminTechService = () => {
                                         <div className="flex justify-between mb-1"><span className="text-xs font-bold text-gray-500">#{ticket.id}</span><span className="text-xs text-gray-400">{new Date(ticket.createdAt).toLocaleDateString()}</span></div>
                                         <h4 className="font-bold text-sm">{ticket.deviceType} {ticket.brand}</h4>
                                         <p className="text-xs text-gray-500 mb-2">{ticket.clientName}</p>
+                                        
+                                        {ticket.assignedTo && technicians.length > 0 && (
+                                            <div className="mb-2 flex items-center gap-1 text-[10px] text-indigo-600 font-bold bg-indigo-50 w-max px-1.5 py-0.5 rounded">
+                                                <PenTool className="w-3 h-3" /> {technicians.find(t => t.id === parseInt(ticket.assignedTo))?.name || 'Técnico'}
+                                            </div>
+                                        )}
+
                                         <div className="bg-yellow-50 text-yellow-800 text-xs p-2 rounded mt-2">
                                             <span className="block font-bold">Diagnóstico Enviado</span>
                                             ${ticket.estimatedCost}
@@ -625,6 +672,12 @@ const AdminTechService = () => {
                                         <div className="flex justify-between mb-1"><span className="text-xs font-bold text-gray-500">#{ticket.id}</span><span className="text-xs text-gray-400">{new Date(ticket.createdAt).toLocaleDateString()}</span></div>
                                         <h4 className="font-bold text-sm">{ticket.deviceType} {ticket.brand}</h4>
                                         <p className="text-xs text-gray-500 mb-2">{ticket.clientName}</p>
+
+                                        {ticket.assignedTo && technicians.length > 0 && (
+                                            <div className="mt-1 flex items-center gap-1 text-[10px] text-indigo-600 font-bold bg-indigo-50 w-max px-1.5 py-0.5 rounded border border-indigo-100">
+                                                <PenTool className="w-3 h-3" /> Tech: {technicians.find(t => t.id === parseInt(ticket.assignedTo))?.name || 'Cargando...'}
+                                            </div>
+                                        )}
 
                                         {isAdmin && (
                                             <button onClick={(e) => { e.stopPropagation(); handleFinishRepair(ticket); }} className="w-full mt-2 py-1 bg-blue-600 text-white text-xs rounded font-bold hover:bg-blue-700 shadow-sm">
@@ -648,6 +701,15 @@ const AdminTechService = () => {
                                         <div className="flex justify-between mb-1"><span className="text-xs font-bold text-gray-500">#{ticket.id}</span><span className="text-xs text-gray-400">{new Date(ticket.createdAt).toLocaleDateString()}</span></div>
                                         <h4 className="font-bold text-sm">{ticket.deviceType} {ticket.brand}</h4>
                                         <p className="text-xs text-gray-500 mb-2">{ticket.clientName}</p>
+
+                                        {ticket.assignedTo && technicians.length > 0 && (
+                                            <div className="mt-1 mb-2 px-2 py-1 bg-indigo-50 rounded text-xs text-indigo-700 flex items-center gap-1 border border-indigo-100">
+                                                <PenTool className="w-3 h-3" />
+                                                <span className="font-medium">
+                                                    Tech: {technicians.find(t => t.id === parseInt(ticket.assignedTo))?.name || 'Cargando...'}
+                                                </span>
+                                            </div>
+                                        )}
 
                                         {isAdmin && (
                                             <button onClick={(e) => { e.stopPropagation(); handleDeliver(ticket); }} className="w-full mt-2 py-1 bg-green-600 text-white text-xs rounded font-bold hover:bg-green-700 shadow-sm">
@@ -687,6 +749,16 @@ const AdminTechService = () => {
                                     <input required placeholder="Marca" value={formData.brand} onChange={e => setFormData({ ...formData, brand: e.target.value })} className="p-3 border rounded-lg" />
                                     <input required placeholder="Modelo" value={formData.model} onChange={e => setFormData({ ...formData, model: e.target.value })} className="p-3 border rounded-lg" />
                                     <input required placeholder="Serial / IMEI" value={formData.serial} onChange={e => setFormData({ ...formData, serial: e.target.value })} className="p-3 border rounded-lg" />
+                                    
+                                    <div className="col-span-2">
+                                        <h4 className="font-bold text-sm text-gray-500 uppercase mt-2 mb-2">Asignación Técnica</h4>
+                                        <select className="w-full p-3 border rounded-lg bg-gray-50" value={formData.assignedTo} onChange={e => setFormData({ ...formData, assignedTo: e.target.value })}>
+                                            <option value="">-- Sin Asignar (Pendiente) --</option>
+                                            {technicians.map(t => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
 
                                     <div className="col-span-2">
                                         <textarea required rows="3" placeholder="Descripción de la Falla (según cliente)" value={formData.issueDescription} onChange={e => setFormData({ ...formData, issueDescription: e.target.value })} className="w-full p-3 border rounded-lg"></textarea>
@@ -815,6 +887,19 @@ const AdminTechService = () => {
                                         <div>
                                             <label className="text-gray-400 text-xs uppercase font-bold">Serial</label>
                                             <div className="font-medium text-gray-800">{selectedTicket.serial || 'N/A'}</div>
+                                        </div>
+                                        <div className="pt-2 border-t mt-2">
+                                            <label className="text-xs uppercase font-bold text-indigo-500 mb-1 block">Técnico Asignado</label>
+                                            <select 
+                                                className="w-full p-2 text-sm border border-indigo-200 rounded-lg bg-indigo-50 font-medium text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                value={selectedTicket.assignedTo || ""}
+                                                onChange={(e) => handleAssignTech(selectedTicket.id, e.target.value)}
+                                            >
+                                                <option value="">-- Sin Asignar / Pendiente --</option>
+                                                {technicians.map(t => (
+                                                    <option key={t.id} value={t.id}>{t.name}</option>
+                                                ))}
+                                            </select>
                                         </div>
                                     </div>
                                 </div>

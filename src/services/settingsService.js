@@ -195,5 +195,36 @@ export const settingsService = {
         localSettings = getDefaultSettings();
         localStorage.setItem('appHomepageSettings', JSON.stringify(localSettings));
         return { ...localSettings };
+    },
+
+    downloadDatabaseBackup: async () => {
+        const token = localStorage.getItem('adminToken');
+        if (!token) throw new Error('No autorizado. Debes ser administrador parea descargar la base de datos.');
+
+        const response = await fetch('/api/admin/backup-db', {
+            headers: {
+                'Authorization': `Bearer ${token}`
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Error al descargar respaldo');
+        }
+
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        
+        // El servidor ya envía el nombre del archivo en Content-Disposition, 
+        // pero por seguridad definimos uno aquí también.
+        const timestamp = new Date().toISOString().split('T')[0];
+        a.download = `lbdc_backup_${timestamp}.sqlite`;
+        
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
     }
 };

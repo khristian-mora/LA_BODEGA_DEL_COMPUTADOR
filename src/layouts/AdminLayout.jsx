@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { LayoutDashboard, ShoppingCart, LogOut, Package, Users, Tag, Wrench, DollarSign, RotateCcw, Menu, X, UserCircle, BarChart3, Shield, Settings, Monitor } from 'lucide-react';
+import { LayoutDashboard, ShoppingCart, LogOut, Package, Users, Tag, Wrench, DollarSign, RotateCcw, Menu, X, UserCircle, BarChart3, Shield, Settings, Monitor, Percent, History } from 'lucide-react';
 import NotificationCenter from '../components/NotificationCenter';
 import { useAudit } from '../context/AuditContext';
 
@@ -19,21 +19,23 @@ const AdminLayout = ({ children, title }) => {
     }, [location.pathname, title]);
 
     const menuItems = [
-        { path: '/admin', name: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'técnico', 'vendedor', 'gerente'] },
+        { path: '/admin', name: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'vendedor', 'gerente'] },
         { path: '/admin/users', name: 'Usuarios', icon: Users, roles: ['admin'] },
-        { path: '/admin/customers', name: 'Clientes', icon: UserCircle, roles: ['admin', 'vendedor', 'técnico'] },
-        { path: '/admin/appointments', name: 'Citas', icon: LayoutDashboard, roles: ['admin', 'vendedor', 'técnico'] },
+        { path: '/admin/customers', name: 'Clientes', icon: UserCircle, roles: ['admin', 'vendedor'] },
+        { path: '/admin/appointments', name: 'Citas', icon: LayoutDashboard, roles: ['admin', 'vendedor'] },
         { path: '/admin/reports', name: 'Reportes', icon: BarChart3, roles: ['admin', 'gerente'] },
         { path: '/admin/warranties', name: 'Garantías', icon: Shield, roles: ['admin', 'técnico', 'vendedor'] },
+        { path: '/admin/coupons', name: 'Cupones', icon: Percent, roles: ['admin', 'gerente'] },
         { path: '/admin/orders', name: 'Pedidos', icon: ShoppingCart, roles: ['admin', 'vendedor', 'gerente'] },
-        { path: '/admin/inventory', name: 'Inventario', icon: Package, roles: ['admin', 'vendedor', 'gerente', 'técnico'] },
+        { path: '/admin/inventory', name: 'Inventario', icon: Package, roles: ['admin', 'vendedor', 'gerente'] },
         { path: '/admin/suppliers', name: 'Proveedores', icon: Users, roles: ['admin', 'vendedor'] },
         { path: '/admin/marketing', name: 'Marketing', icon: Tag, roles: ['admin', 'gerente'] },
         { path: '/admin/tech-service', name: 'Servicio Técnico', icon: Wrench, roles: ['admin', 'técnico'] },
         { path: '/admin/hr', name: 'Recursos Humanos', icon: Users, roles: ['admin'] },
         { path: '/admin/finance', name: 'Contabilidad', icon: DollarSign, roles: ['admin', 'gerente'] },
-        { path: '/admin/returns', name: 'Devoluciones', icon: RotateCcw, roles: ['admin', 'vendedor', 'técnico'] },
+        { path: '/admin/returns', name: 'Devoluciones', icon: RotateCcw, roles: ['admin', 'vendedor'] },
         { path: '/admin/settings', name: 'Configuración', icon: Settings, roles: ['admin'] },
+        { path: '/admin/audit', name: 'Auditoría', icon: History, roles: ['admin', 'gerente'] },
     ];
 
     const filteredMenu = menuItems.filter(item => item.roles.includes(userRole));
