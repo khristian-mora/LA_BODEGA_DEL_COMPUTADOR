@@ -359,14 +359,14 @@ app.post('/api/user/cart/sync', authenticateToken, userRoutes.syncCart);
 
 // Customers
 app.get('/api/customers', authenticateToken, requireRole(['admin', 'vendedor', 'technician', 'técnico']), customerRoutes.getCustomers);
-app.get('/api/customers/export', authenticateToken, requireAdmin, customerRoutes.exportCustomers);
+app.get('/api/customers/export', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.exportCustomers);
 app.get('/api/customers/stats', authenticateToken, requireAdmin, customerRoutes.getCustomerStats);
 app.get('/api/customers/search', authenticateToken, customerRoutes.searchCustomers);
+app.get('/api/customers/birthdays', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.getBirthdayCustomers);
 app.get('/api/customers/:id', authenticateToken, customerRoutes.getCustomer);
 app.post('/api/customers', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.createCustomer);
 app.put('/api/customers/:id', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.updateCustomer);
 app.delete('/api/customers/:id', authenticateToken, requireAdmin, customerRoutes.deleteCustomer);
-app.get('/api/customers/birthdays', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.getBirthdayCustomers);
 app.post('/api/customers/import', authenticateToken, requireAdmin, uploadBuffer.single('file'), customerRoutes.importCustomers);
 
 // Appointments

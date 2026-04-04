@@ -95,7 +95,10 @@ const AdminCustomers = () => {
         try {
             const token = localStorage.getItem('adminToken');
             const response = await fetch(buildApiUrl('/api/customers/birthdays'), {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
             });
             if (!response.ok) throw new Error('Error: ' + response.status);
             const data = await response.json();
@@ -224,7 +227,10 @@ const AdminCustomers = () => {
             setLoading(true);
             const token = localStorage.getItem('adminToken');
             const response = await fetch(buildApiUrl('/api/customers/export'), {
-                headers: { 'Authorization': `Bearer ${token}` }
+                headers: { 
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
             });
             
             if (!response.ok) throw new Error('Error al obtener datos de exportación');
