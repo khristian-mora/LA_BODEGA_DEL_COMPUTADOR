@@ -260,6 +260,7 @@ export const createCustomer = async (req, res) => {
             phone: phone ? phone.trim() : null,
             customerType: customerType || 'Regular',
             status: 'active',
+            birthday: birthday || null,
             createdAt: now
         });
     });
