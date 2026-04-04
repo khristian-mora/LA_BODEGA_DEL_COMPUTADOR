@@ -97,13 +97,14 @@ const AdminCustomers = () => {
             const response = await fetch(buildApiUrl('/api/customers/birthdays'), {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
-            if (!response.ok) throw new Error('Failed to fetch');
+            if (!response.ok) throw new Error('Error: ' + response.status);
             const data = await response.json();
-            setBirthdayCustomers(data.customers || []);
+            const customersList = Array.isArray(data) ? data : (data.customers || data.data || []);
+            setBirthdayCustomers(customersList);
             setShowBirthdays(true);
         } catch (error) {
-            console.error(error);
-            showAlert({ title: 'Error', message: 'Error al cargar cumpleaños', type: 'error' });
+            console.error('[Birthdays] Error:', error);
+            showAlert({ title: 'Error', message: 'Error al cargar cumpleaños: ' + error.message, type: 'error' });
         }
     };
 
@@ -205,25 +206,39 @@ const AdminCustomers = () => {
     };
 
     const handleDownloadTemplate = () => {
-        const headers = [['Nombre Completo', 'Cedula/NIT', 'Email', 'Telefono', 'Direccion', 'Tipo de Cliente', 'Notas']];
-        const dummyData = [['Juan Perez', '12345678', 'juan@ejemplo.com', '5551234', 'Calle 123', 'Regular', 'Cliente frecuente']];
-        const wb = XLSX.utils.book_new();
-        const ws = XLSX.utils.aoa_to_sheet([...headers, ...dummyData]);
-        XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
-        XLSX.writeFile(wb, 'plantilla_clientes_lbdc.xlsx');
+        try {
+            const headers = [['Nombre Completo', 'Cedula/NIT', 'Email', 'Telefono', 'Direccion', 'Tipo de Cliente', 'Notas']];
+            const dummyData = [['Juan Perez', '12345678', 'juan@ejemplo.com', '5551234', 'Calle 123', 'Regular', 'Cliente frecuente']];
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet([...headers, ...dummyData]);
+            XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
+            XLSX.writeFile(wb, 'plantilla_clientes_lbdc.xlsx');
+        } catch (error) {
+            console.error('[Template] Error:', error);
+            showAlert({ title: 'Error', message: 'No se pudo descargar la plantilla', type: 'error' });
+        }
     };
 
     const handleExportExcel = async () => {
         try {
             setLoading(true);
             const token = localStorage.getItem('adminToken');
-            const response = await fetch(buildApiUrl(`/api/customers/export?format=json&token=${token}`));
+            const response = await fetch(buildApiUrl('/api/customers/export'), {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             
             if (!response.ok) throw new Error('Error al obtener datos de exportación');
             
             const allCustomers = await response.json();
+            const customersList = Array.isArray(allCustomers) ? allCustomers : (allCustomers.customers || allCustomers.data || []);
             
-            const dataToExport = allCustomers.map(c => ({
+            if (customersList.length === 0) {
+                showAlert({ title: 'Advertencia', message: 'No hay clientes para exportar', type: 'warning' });
+                setLoading(false);
+                return;
+            }
+            
+            const dataToExport = customersList.map(c => ({
                 ID: c.id,
                 Nombre: c.name || '',
                 'Cedula/NIT': c.idNumber || '',
@@ -241,7 +256,8 @@ const AdminCustomers = () => {
             XLSX.utils.book_append_sheet(wb, ws, 'Clientes');
             XLSX.writeFile(wb, `LBDC_CUSTOMERS_${new Date().toISOString().split('T')[0]}.xlsx`);
         } catch (error) {
-            showAlert({ title: 'Error', message: 'No se pudo exportar el listado de clientes', type: 'error' });
+            console.error('[Export] Error:', error);
+            showAlert({ title: 'Error', message: 'No se pudo exportar el listado de clientes: ' + error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
