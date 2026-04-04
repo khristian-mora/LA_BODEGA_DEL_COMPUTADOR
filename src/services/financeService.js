@@ -1,5 +1,4 @@
-const EXPENSES_API = '/api/expenses';
-const ORDERS_API = '/api/orders';
+import { buildApiUrl } from '../config/config';
 
 const getHeaders = () => {
     const token = localStorage.getItem('adminToken');
@@ -13,16 +12,18 @@ export const financeService = {
     getFinancialSummary: async () => {
         try {
             // Fetch expenses from API
-            const expensesResponse = await fetch(EXPENSES_API, { headers: getHeaders() });
-            const expenses = expensesResponse.ok ? await expensesResponse.json() : [];
+            const expensesResponse = await fetch(buildApiUrl('/api/expenses'), { headers: getHeaders() });
+            const expensesData = expensesResponse.ok ? await expensesResponse.json() : [];
+            const expenses = Array.isArray(expensesData) ? expensesData : (expensesData.expenses || expensesData.data || []);
             const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
 
             // Fetch orders from API
             let ordersRevenue = 0;
             try {
-                const ordersResponse = await fetch(ORDERS_API, { headers: getHeaders() });
+                const ordersResponse = await fetch(buildApiUrl('/api/orders'), { headers: getHeaders() });
                 if (ordersResponse.ok) {
-                    const orders = await ordersResponse.json();
+                    const data = await ordersResponse.json();
+                    const orders = Array.isArray(data) ? data : (data.orders || data.data || []);
                     ordersRevenue = orders
                         .filter(o => o.status !== 'Cancelado')
                         .reduce((sum, o) => sum + (o.total || 0), 0);
@@ -54,38 +55,38 @@ export const financeService = {
     },
 
     addExpense: async (data) => {
-        const response = await fetch(EXPENSES_API, {
+        const response = await fetch(buildApiUrl('/api/expenses'), {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Error al agregar gasto');
         }
         return response.json();
     },
 
     updateExpense: async (id, data) => {
-        const response = await fetch(`${EXPENSES_API}/${id}`, {
+        const response = await fetch(buildApiUrl(`/api/expenses/${id}`), {
             method: 'PUT',
             headers: getHeaders(),
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Error al actualizar gasto');
         }
         return response.json();
     },
 
     deleteExpense: async (id) => {
-        const response = await fetch(`${EXPENSES_API}/${id}`, {
+        const response = await fetch(buildApiUrl(`/api/expenses/${id}`), {
             method: 'DELETE',
             headers: getHeaders()
         });
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Error al eliminar gasto');
         }
         return response.json();
@@ -102,47 +103,44 @@ export const financeService = {
         if (params.sortBy) queryParams.append('sortBy', params.sortBy);
         if (params.sortOrder) queryParams.append('sortOrder', params.sortOrder);
 
-        let url = EXPENSES_API;
-        if (queryParams.toString()) url += `?${queryParams.toString()}`;
-
+        const url = buildApiUrl(`/api/expenses?${queryParams.toString()}`);
         const response = await fetch(url, { headers: getHeaders() });
         if (!response.ok) throw new Error('Error al cargar gastos');
         return response.json();
     },
 
     getExpenseSummary: async (startDate, endDate) => {
-        let url = `${EXPENSES_API}/summary`;
         const params = new URLSearchParams();
         if (startDate) params.append('startDate', startDate);
         if (endDate) params.append('endDate', endDate);
-        if (params.toString()) url += `?${params.toString()}`;
-
+        
+        const url = buildApiUrl(`/api/expenses/summary?${params.toString()}`);
         const response = await fetch(url, { headers: getHeaders() });
         if (!response.ok) throw new Error('Error al obtener resumen de gastos');
         return response.json();
     },
 
     approveExpense: async (id) => {
-        const response = await fetch(`${EXPENSES_API}/${id}/status`, {
+        const response = await fetch(buildApiUrl(`/api/expenses/${id}/status`), {
             method: 'PUT',
             headers: getHeaders(),
             body: JSON.stringify({ status: 'approved' })
         });
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Error al aprobar gasto');
         }
         return response.json();
     },
 
     rejectExpense: async (id) => {
-        const response = await fetch(`${EXPENSES_API}/${id}/status`, {
+        const response = await fetch(buildApiUrl(`/api/expenses/${id}/status`), {
             method: 'PUT',
             headers: getHeaders(),
             body: JSON.stringify({ status: 'rejected' })
         });
         if (!response.ok) {
-            const error = await response.json();
+            const error = await response.json().catch(() => ({}));
             throw new Error(error.error || 'Error al rechazar gasto');
         }
         return response.json();
@@ -156,14 +154,13 @@ export const financeService = {
         if (params.startDate) queryParams.append('startDate', params.startDate);
         if (params.endDate) queryParams.append('endDate', params.endDate);
 
-        const response = await fetch(`${EXPENSES_API}/export?${queryParams.toString()}`, {
+        const response = await fetch(buildApiUrl(`/api/expenses/export?${queryParams.toString()}`), {
             headers: getHeaders()
         });
         if (!response.ok) throw new Error('Error al exportar gastos');
         return response.text();
     },
 
-    // Keep for backward compatibility but it's now a no-op
     registerIncome: async (_data) => {
         console.warn('registerIncome is deprecated. Income is now calculated from orders.');
         return { success: true };

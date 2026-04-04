@@ -1,17 +1,17 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import laptopImg from '../assets/hero_laptop.png';
-import pcImg from '../assets/hero_gaming_pc.png';
-import accImg from '../assets/hero_kb_mouse.png';
-
-const categories = [
-    { id: 1, name: 'Portátiles', image: laptopImg, items: '120+ Modelos' },
-    { id: 2, name: 'PCs Gamer', image: pcImg, items: 'Armados a medida' },
-    { id: 3, name: 'Accesorios', image: accImg, items: 'Teclados y más' },
-];
+import { useSettings } from '../context/SettingsContext';
+import { buildUploadUrl } from '../config/config';
 
 const CategoryGrid = () => {
+    const { settings } = useSettings();
+
+    const categories = [
+        { id: 1, name: 'Portátiles', image: settings.cat1_image || '/src/assets/hero_laptop.png', items: '120+ Modelos' },
+        { id: 2, name: 'PCs Gamer', image: settings.cat2_image || '/src/assets/hero_gaming_pc.png', items: 'Armados a medida' },
+        { id: 3, name: 'Accesorios', image: settings.cat3_image || '/src/assets/hero_kb_mouse.png', items: 'Teclados y más' },
+    ];
     const containerVariants = {
         hidden: {},
         visible: {
@@ -77,7 +77,7 @@ const CategoryGrid = () => {
                                 whileHover={{ scale: 1.08 }}
                                 transition={{ type: "spring", stiffness: 200, damping: 15 }}
                             >
-                                <img src={cat.image} alt={cat.name} className="w-3/4 object-contain drop-shadow-lg" />
+                                <img src={buildUploadUrl(cat.image)} alt={cat.name} className="w-3/4 object-contain drop-shadow-lg" />
                             </motion.div>
 
                             {/* Explore Button - Bottom */}

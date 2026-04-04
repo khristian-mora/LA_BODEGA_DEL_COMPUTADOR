@@ -1,6 +1,7 @@
 // Intake Receipt Generation (Comprobante de Ingreso)
 import { db } from './db.js';
 import nodemailer from 'nodemailer';
+import PDFDocument from 'pdfkit';
 
 
 // Email transporter configuration (Reusing from other files, ideally should be a shared utility)
@@ -14,391 +15,547 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Helper is no longer needed for DB images as we embed them or use the API route, 
-// but we keep it if we mix legacy file-based images.
-const getFullImageUrl = (path) => {
-    if (!path) return '';
-    if (path.startsWith('data:')) return path; // Already base64
-    if (path.startsWith('http')) return path;
-    const baseUrl = process.env.PUBLIC_URL || `http://${process.env.HOST || 'localhost'}:${process.env.PORT || 3000}`;
-    return `${baseUrl}${path}`;
+// Helper to fetch settings from DB
+const getSetting = (key, defaultValue = '') => {
+    return new Promise((resolve) => {
+        db.get('SELECT value FROM settings WHERE key = ?', [key], (err, row) => {
+            if (err || !row) resolve(defaultValue);
+            else resolve(row.value);
+        });
+    });
 };
 
-const generateIntakeHtml = (ticket, evidenceList = []) => {
+// Helper is no longer needed for DB images as we embed them or use the API route, 
+// but we keep it if we mix legacy file-based images.
+// Helper to ensure absolute URLs for images
+const getAbsoluteUrl = (path, baseUrl) => {
+    if (!path) return '';
+    // If it's already a full URL or Base64 data, return as-is
+    if (path.startsWith('http') || path.startsWith('data:')) return path;
+    
+    const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    return `${cleanBase}${cleanPath}`;
+};
+
+const generateIntakeHtml = (ticket, evidenceList = [], baseUrl = '', settings = {}) => {
+    const businessName = settings.businessName || 'LA BODEGA DEL COMPUTADOR';
+    const businessAddress = settings.businessAddress || 'Cl. 49 #13-13, Barrancabermeja';
+    const businessPhone = settings.whatsappNumber || '+57 317 653 2488';
+    const businessEmail = settings.businessEmail || 'ventas@labodegadelcomputador.com';
+    const businessDomain = settings.businessDomain || 'www.labodegadelcomputador.com';
+
     const date = new Date(ticket.createdAt).toLocaleDateString('es-CO', {
         year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
 
     // Merge legacy photos (if any) with new DB evidence
-    let legacyPhotos = [];
+    let photos = [];
     try {
-        legacyPhotos = typeof ticket.photosIntake === 'string' ? JSON.parse(ticket.photosIntake) : (ticket.photosIntake || []);
-    } catch { legacyPhotos = []; }
+        const legacyPhotos = typeof ticket.photosIntake === 'string' ? JSON.parse(ticket.photosIntake) : (ticket.photosIntake || []);
+        // Only keep valid local URLs or files, filter out broken blob URLs
+        const validLegacy = legacyPhotos.filter(p => p && !p.startsWith('blob:'));
+        
+        // Add DB Evidence if available
+        const evidenceUrls = (evidenceList || []).map(ev => `/api/evidence/${ev.id}`);
+        
+        photos = [...validLegacy, ...evidenceUrls];
+    } catch { photos = []; }
 
     return `
 <!DOCTYPE html>
-<html lang="es">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>Comprobante de Ingreso - ${ticket.id}</title>
+    <title>Comprobante de Ingreso #${ticket.id || 'N/A'}</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-        
         :root {
-            --primary: #004236;
-            --accent: #CCD32A;
+            --primary: #2563eb;
+            --secondary: #64748b;
+            --accent: #3b82f6;
+            --bg-light: #f1f5f9;
             --text-dark: #1e293b;
             --text-light: #64748b;
-            --bg-light: #f8fafc;
+            --border: #e2e8f0;
         }
-
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #e2e8f0;
-            margin: 0;
-            padding: 0;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-        }
-
-        .receipt-container {
-            max-width: 800px;
-            margin: 20px auto;
-            background: white;
-            padding: 0;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-            overflow: hidden;
-            position: relative;
-        }
-
-        .header {
-            background-color: var(--primary);
-            color: white;
-            padding: 30px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 4px solid var(--accent);
-        }
-
-        .logo-section h1 {
-            margin: 0;
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: -0.5px;
-        }
-
-        .logo-section p {
-            margin: 5px 0 0;
-            opacity: 0.8;
-            font-size: 14px;
-        }
-
-        .ticket-id {
-            text-align: right;
-        }
-
-        .ticket-id span {
-            display: block;
-            font-size: 12px;
-            opacity: 0.8;
-            text-transform: uppercase;
-        }
-
-        .ticket-id strong {
-            font-size: 32px;
-            font-weight: 800;
-            color: var(--accent);
-        }
-
-        .content {
-            padding: 40px;
-        }
-
-        .section-title {
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: var(--text-light);
-            font-weight: 600;
-            border-bottom: 1px solid #e2e8f0;
-            padding-bottom: 10px;
-            margin-bottom: 20px;
-            margin-top: 30px;
-        }
-        .section-title:first-child {
-            margin-top: 0;
-        }
-
-        .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
-        }
-
-        .field {
-            margin-bottom: 15px;
-        }
-
-        .field label {
-            display: block;
-            font-size: 11px;
-            color: var(--text-light);
-            text-transform: uppercase;
-            margin-bottom: 4px;
-        }
-
-        .field .value {
-            font-size: 16px;
-            color: var(--text-dark);
-            font-weight: 600;
-            border-left: 2px solid var(--accent);
-            padding-left: 10px;
-        }
-
-        .description-box {
-            background: var(--bg-light);
-            padding: 20px;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            font-size: 14px;
-            color: var(--text-dark);
-            line-height: 1.6;
-        }
-
-        .photo-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 20px;
-        }
-        
-        .photo-card {
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #f8fafc;
-        }
-        
-        .photo-card img {
-            width: 100%;
-            height: 150px;
-            object-fit: cover;
-            display: block;
-        }
-        
-        .photo-label {
-            padding: 8px;
-            font-size: 10px;
-            color: #64748b;
-            text-align: center;
-            border-top: 1px solid #e2e8f0;
-        }
-
-        .disclaimer {
-            margin-top: 40px;
-            font-size: 10px;
-            color: #64748b;
-            text-align: justify;
-            line-height: 1.5;
-            padding: 20px;
-            background: #f8fafc;
-            border-top: 1px solid #e2e8f0;
-        }
-
-        .signature-section {
-            display: flex;
-            justify-content: space-between;
-            margin-top: 60px;
-            padding-top: 20px;
-        }
-
-        .signature-box {
-            width: 40%;
-            border-top: 1px solid #ddd;
-            text-align: center;
-            font-size: 12px;
-            color: var(--text-light);
-            padding-top: 10px;
-        }
-
-        .footer {
-            background: var(--primary);
-            color: white;
-            text-align: center;
-            padding: 15px;
-            font-size: 12px;
-        }
-
-        @media print {
-            body { background: white; }
-            .receipt-container { margin: 0; box-shadow: none; width: 100%; max-width: 100%; }
-            .header { -webkit-print-color-adjust: exact; }
-        }
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 20px; background: #e2e8f0; color: var(--text-dark); }
+        .receipt-container { max-width: 800px; margin: 0 auto; background: white; border-radius: 24px; overflow: hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.1); }
+        .header { background: var(--text-dark); color: white; padding: 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 5px solid var(--primary); }
+        .brand-logo { width: 45px; height: 45px; background: var(--primary); border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(37,99,235,0.3); }
+        .logo-section h1 { margin: 0; font-size: 20px; letter-spacing: 2px; font-weight: 900; }
+        .logo-section p { margin: 0; font-size: 10px; letter-spacing: 4px; opacity: 0.6; font-weight: 700; text-transform: uppercase; }
+        .ticket-badge { text-align: right; }
+        .ticket-badge span { display: block; font-size: 10px; opacity: 0.7; font-weight: 700; }
+        .ticket-badge strong { font-size: 24px; color: var(--accent); }
+        .content { padding: 40px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+        .info-card { background: #fff; border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
+        .section-header { font-size: 12px; font-weight: 800; text-transform: uppercase; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid var(--border); color: var(--primary); }
+        .field { margin-bottom: 10px; }
+        .field label { font-size: 9px; color: var(--text-light); text-transform: uppercase; font-weight: 800; display: block; }
+        .field .value { font-size: 14px; font-weight: 600; }
+        .description-box { background: #f8fafc; padding: 20px; border-radius: 12px; border-left: 4px solid var(--primary); font-size: 13px; min-height: 50px; }
+        .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px; }
+        .photo-card { border-radius: 8px; overflow: hidden; aspect-ratio: 1; border: 1px solid var(--border); }
+        .photo-card img { width: 100%; height: 100%; object-fit: cover; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 50px; }
+        .sign-box { width: 40%; border-top: 1px solid var(--text-dark); text-align: center; padding-top: 10px; font-size: 10px; }
+        .footer { background: #f8fafc; padding: 20px; text-align: center; font-size: 10px; color: var(--text-light); border-top: 1px solid var(--border); }
     </style>
 </head>
 <body>
-
     <div class="receipt-container">
         <div class="header">
-            <div class="logo-section">
-                <h1>LA BODEGA DEL COMPUTADOR</h1>
-                <p>Comprobante de Recepción de Equipo</p>
+            <div class="brand-header">
+                <div class="brand-logo">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                </div>
+                <div class="logo-section">
+                    <h1>LA BODEGA</h1>
+                    <p>DEL COMPUTADOR</p>
+                </div>
             </div>
-            <div class="ticket-id">
-                <span>Orden de Servicio</span>
-                <strong>#${ticket.id}</strong>
+            <div class="ticket-badge">
+                <span>Orden de Servicio No.</span>
+                <strong>#${ticket.id || '---'}</strong>
             </div>
         </div>
 
         <div class="content">
-            <div class="grid">
-                <div>
-                    <div class="section-title">Datos del Cliente</div>
+            <div class="info-grid">
+                <div class="info-card">
+                    <div class="section-header">Cliente</div>
                     <div class="field">
                         <label>Nombre</label>
-                        <div class="value">${ticket.clientName}</div>
+                        <div class="value">${ticket.clientName || 'N/A'}</div>
                     </div>
                     <div class="field">
                         <label>Teléfono</label>
-                        <div class="value">${ticket.clientPhone}</div>
+                        <div class="value">${ticket.clientPhone || 'N/A'}</div>
                     </div>
                     <div class="field">
                         <label>Fecha de Ingreso</label>
                         <div class="value">${date}</div>
                     </div>
                 </div>
-                <div>
-                    <div class="section-title">Datos del Equipo</div>
+                <div class="info-card">
+                    <div class="section-header">Equipo</div>
                     <div class="field">
-                        <label>Tipo</label>
-                        <div class="value">${ticket.deviceType}</div>
+                        <label>Tipo / Marca</label>
+                        <div class="value">${ticket.deviceType || 'Equipo'} - ${ticket.brand || 'Genérico'}</div>
                     </div>
                     <div class="field">
-                        <label>Marca / Modelo</label>
-                        <div class="value">${ticket.brand} ${ticket.model}</div>
-                    </div>
-                    <div class="field">
-                        <label>Serial / IMEI</label>
-                        <div class="value">${ticket.serial || 'N/A'}</div>
+                        <label>Modelo / Serial</label>
+                        <div class="value">${ticket.model || 'N/A'} — ${ticket.serial || 'S/N'}</div>
                     </div>
                 </div>
             </div>
 
-            <div class="section-title">Detalle del Servicio</div>
+            <div class="section-header">Descripción del Problema</div>
             <div class="description-box">
-                <div style="font-weight: bold; margin-bottom: 5px; color: var(--primary);">Motivo de Ingreso / Falla Reportada:</div>
-                ${ticket.issueDescription}
+                ${ticket.issueDescription || 'Sin descripción detallada.'}
             </div>
 
-            ${(evidenceList.length > 0 || legacyPhotos.length > 0) ? `
-            <div class="section-title">Evidencia Fotográfica de Ingreso</div>
-            <div class="photo-grid">
-                ${evidenceList.map((photo, index) => `
-                <div class="photo-card">
-                    <img src="${photo.photo_data}" alt="Evidencia DB ${index + 1}">
-                    <div class="photo-label">Evidencia ${index + 1}</div>
+            ${photos.length > 0 ? `
+            <div style="margin-top: 30px;">
+                <div class="section-header">Evidencia de Ingreso</div>
+                <div class="photo-grid">
+                    ${photos.map(p => `
+                        <div class="photo-card">
+                            <img src="${getAbsoluteUrl(p, baseUrl)}" alt="Evidencia">
+                        </div>
+                    `).join('')}
                 </div>
-                `).join('')}
-                ${legacyPhotos.map((url, index) => `
-                <div class="photo-card">
-                    <img src="${getFullImageUrl(url)}" alt="Evidencia ${evidenceList.length + index + 1}">
-                    <div class="photo-label">Evidencia ${evidenceList.length + index + 1}</div>
-                </div>
-                `).join('')}
             </div>
             ` : ''}
 
-            <div class="disclaimer">
-                <strong>CLÁUSULA DE RESPONSABILIDAD Y GARANTÍA:</strong><br><br>
-                1. <strong>Diagnóstico:</strong> El valor del diagnóstico (si aplica) no es reembolsable. El diagnóstico preliminar está sujeto a verificación técnica profunda.<br>
-                2. <strong>Información:</strong> LA BODEGA DEL COMPUTADOR no se hace responsable por la pérdida de información (datos, archivos, software) almacenada en los equipos. Es responsabilidad del cliente realizar copias de seguridad antes de entregar el equipo.<br>
-                3. <strong>Garantía:</strong> La garantía por reparaciones es de tres (3) meses y cubre exclusivamente la mano de obra y repuestos cambiados por la misma falla. No cubre daños por virus, software, humedad, golpes, sobrecargas eléctricas o manipulación por terceros.<br>
-                4. <strong>Abandono:</strong> Pasados treinta (30) días calendario desde la notificación de finalización del servicio (reparado o no), si el equipo no es retirado, se cobrará bodegaje diario. Pasados noventa (90) días, el equipo se considerará abandonado y LA BODEGA DEL COMPUTADOR podrá disponer de él para cubrir los costos de revisión, reparación y almacenamiento (Artículo 18 de la Ley 1480 de 2011).<br>
-                5. <strong>Estado del Equipo:</strong> El equipo se recibe en el estado descrito. Rayones o golpes no reportados en el momento del ingreso se asumen como preexistentes.
-            </div>
-
-            <div class="signature-section">
-                <div class="signature-box">
-                    Firma del Cliente<br>
-                    (Acepto términos y condiciones)
+            <div class="signatures">
+                <div class="sign-box">
+                    <div style="height: 40px;"></div>
+                    <strong>${ticket.technicianName || 'Recepción'}</strong><br>Entregado por
                 </div>
-                <div class="signature-box">
-                    Recibido por:<br>
-                    <strong>La Bodega del Computador</strong>
+                <div class="sign-box">
+                    <div style="height: 40px;"></div>
+                    <strong>${ticket.clientName || 'Firma Cliente'}</strong><br>Recibido por (Cliente)
                 </div>
             </div>
         </div>
 
         <div class="footer">
-            Dirección: Cl. 49 #13-13, Barrancabermeja | Tel: ${process.env.BUSINESS_PHONE || '300 000 0000'} | Email: ventas@labodega.com
+            PBX: ${settings.whatsappNumber || 'N/A'} | ${settings.businessAddress || 'Barrancabermeja'} | ${settings.businessEmail || ''}
+            <br><strong>${settings.businessDomain || ''}</strong>
         </div>
     </div>
-
 </body>
-</html>
-    `;
+</html>`;
 };
 
-// Preview Endpoint
+// Preview Receipt (Local Preview)
 export const previewIntakeReceipt = (req, res) => {
     const { ticketId } = req.params;
-    db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, ticket) => {
-        if (err || !ticket) return res.status(404).send('Ticket not found');
+    console.log('Preview request for ticket:', ticketId);
+    
+    const settingsKeys = ['businessName', 'businessAddress', 'whatsappNumber', 'businessEmail', 'businessDomain'];
+    const settings = {};
 
-        // Fetch evidence
-        db.all('SELECT * FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (err, evidence) => {
-            const html = generateIntakeHtml(ticket, evidence || []);
-            res.setHeader('Content-Type', 'text/html');
-            res.send(html);
+    const fetchFullData = async () => {
+        for (const key of settingsKeys) {
+            settings[key] = await getSetting(key);
+        }
+
+        return new Promise((resolve) => {
+            const query = `
+                SELECT t.*, u.name as technicianName 
+                FROM tickets t 
+                LEFT JOIN users u ON t.assignedTo = u.id 
+                WHERE t.id = ?
+            `;
+            db.get(query, [ticketId], (err, row) => {
+                if (err || !row) return resolve(null);
+
+                db.all('SELECT * FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
+                    row.dbEvidence = evRows || [];
+                    resolve(row);
+                });
+            });
         });
+    };
+
+    fetchFullData().then(ticket => {
+        console.log('Ticket found:', ticket);
+        if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
+
+        const host = req.get('host');
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+        const baseUrl = `${protocol}://${host}`;
+        const html = generateIntakeHtml(ticket, ticket.dbEvidence || [], baseUrl, settings);
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
     });
 };
 
 // Send Email Endpoint
 export const sendIntakeReceipt = async (req, res) => {
     const { ticketId } = req.params;
-    const { email } = req.body; // Optional override
+    const { email } = req.body;
 
     try {
+        console.log(`[EMAIL] Attempting to send intake receipt for Ticket #${ticketId}`);
+        const settingsKeys = ['businessName', 'businessAddress', 'whatsappNumber', 'businessEmail', 'businessDomain'];
+        const settings = {};
+        for (const key of settingsKeys) {
+            settings[key] = await getSetting(key);
+        }
+
         const ticket = await new Promise((resolve, reject) => {
-            db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, row) => {
-                if (err) reject(err);
-                else resolve(row);
+            const query = `
+                SELECT t.*, u.name as technicianName 
+                FROM tickets t 
+                LEFT JOIN users u ON t.assignedTo = u.id 
+                WHERE t.id = ?
+            `;
+            db.get(query, [ticketId], (err, row) => {
+                if (err) {
+                    console.error(`[DB] Receipt query failed:`, err.message);
+                    return reject(err);
+                }
+                if (!row) return resolve(null);
+
+                db.all('SELECT * FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
+                    row.dbEvidence = evRows || [];
+                    resolve(row);
+                });
             });
         });
 
-        if (!ticket) return res.status(404).json({ error: 'Ticket not found' });
-
-        const evidence = await new Promise((resolve) => {
-            db.all('SELECT * FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (err, rows) => {
-                resolve(rows || []);
-            });
-        });
-
-        // Extract email from tickets field or param
-        let targetEmail = email;
-        if (!targetEmail && ticket.clientPhone && ticket.clientPhone.includes('@')) {
-            targetEmail = ticket.clientPhone;
+        if (!ticket) {
+            console.warn(`[EMAIL] Ticket #${ticketId} not found for receipt.`);
+            return res.status(404).json({ error: 'Ticket non-existent' });
         }
 
+        let targetEmail = email || ticket.clientEmail;
         if (!targetEmail) {
-            return res.json({ success: false, message: 'No valid email found to send receipt.' });
+            console.warn(`[EMAIL] No target email for Ticket #${ticketId}`);
+            return res.json({ success: false, message: 'No hay un email válido para enviar el comprobante.' });
         }
 
-        const html = generateIntakeHtml(ticket, evidence);
-
-        await transporter.sendMail({
-            from: process.env.SMTP_FROM || 'LA BODEGA DEL COMPUTADOR <noreply@labodega.com>',
-            to: targetEmail,
-            subject: `Comprobante de Ingreso #${ticket.id} - La Bodega del Computador`,
-            html: html
+        const host = req.get('host');
+        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+        const baseUrl = `${protocol}://${host}`;
+        
+        // Generate PDF buffer
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        let pdfBuffer = [];
+        doc.on('data', chunk => pdfBuffer.push(chunk));
+        
+        const pdfGenerated = new Promise((resolve) => {
+            doc.on('end', () => resolve(Buffer.concat(pdfBuffer)));
+            
+            const businessName = settings.businessName || 'LA BODEGA DEL COMPUTADOR';
+            const businessAddress = settings.businessAddress || 'Cl. 49 #13-13, Barrancabermeja';
+            const businessPhone = settings.whatsappNumber || '+57 317 653 2488';
+            const businessEmail = settings.businessEmail || 'ventas@labodegadelcomputador.com';
+            
+            doc.fillColor('#1e293b').fontSize(20).text(businessName, { align: 'center' });
+            doc.fillColor('#64748b').fontSize(10).text('DEL COMPUTADOR', { align: 'center' });
+            doc.moveDown();
+            doc.fillColor('#2563eb').fontSize(16).text(`Orden de Servicio No. #${ticket.id}`, { align: 'center' });
+            doc.moveDown(2);
+            doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').stroke();
+            doc.moveDown();
+            
+            doc.fillColor('#2563eb').fontSize(12).text('CLIENTE', 50);
+            doc.moveDown(0.5);
+            doc.fillColor('#1e293b').fontSize(11);
+            doc.text(`Nombre: ${ticket.clientName || 'N/A'}`);
+            doc.text(`Teléfono: ${ticket.clientPhone || 'N/A'}`);
+            doc.text(`Email: ${ticket.clientEmail || 'N/A'}`);
+            doc.text(`Fecha: ${new Date(ticket.createdAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
+            doc.moveDown();
+            
+            doc.fillColor('#2563eb').fontSize(12).text('EQUIPO', 50);
+            doc.moveDown(0.5);
+            doc.fillColor('#1e293b').fontSize(11);
+            doc.text(`Tipo: ${ticket.deviceType || 'Equipo'}`);
+            doc.text(`Marca: ${ticket.brand || 'Genérico'}`);
+            doc.text(`Modelo: ${ticket.model || 'N/A'}`);
+            doc.text(`Serial: ${ticket.serial || 'S/N'}`);
+            doc.moveDown();
+            
+            doc.fillColor('#2563eb').fontSize(12).text('DESCRIPCIÓN DEL PROBLEMA', 50);
+            doc.moveDown(0.5);
+            doc.fillColor('#475569').fontSize(10);
+            doc.text(ticket.issueDescription || 'Sin descripción', { width: 495 });
+            doc.moveDown(2);
+            
+            doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').stroke();
+            doc.moveDown();
+            
+            doc.fillColor('#1e293b').fontSize(10);
+            doc.text('Entregado por:', 50);
+            doc.moveDown();
+            doc.moveTo(50, doc.y).lineTo(200, doc.y).strokeColor('#1e293b').stroke();
+            doc.text(ticket.technicianName || 'Recepción', 50);
+            
+            doc.text('Recibido por:', 350);
+            doc.moveTo(350, doc.y - 5).lineTo(500, doc.y - 5).strokeColor('#1e293b').stroke();
+            doc.text(ticket.clientName || 'Firma Cliente', 350);
+            
+            doc.moveDown(3);
+            doc.fillColor('#64748b').fontSize(8).text(`PBX: ${businessPhone} | ${businessAddress} | ${businessEmail}`, { align: 'center' });
+            
+            doc.end();
         });
+        
+        const pdfContent = await pdfGenerated;
 
-        res.json({ success: true, message: `Receipt sent to ${targetEmail}` });
+        // Basic check for SMTP availability
+        if (!process.env.SMTP_HOST || !process.env.SMTP_USER) {
+            console.error('[EMAIL] SMTP Configuration is missing in .env');
+            return res.status(400).json({ error: 'El sistema de correos no está configurado (SMTP missing).' });
+        }
+
+        try {
+            await transporter.sendMail({
+                from: process.env.SMTP_FROM || `"${settings.businessName || 'La Bodega'}" <noreply@labodega.com>`,
+                to: targetEmail,
+                subject: `Comprobante de Ingreso #${ticket.id} - ${settings.businessName || 'Servicio Técnico'}`,
+                html: `
+                    <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
+                        <div style="background: #0f172a; padding: 30px; text-align: center; border-bottom: 5px solid #6366f1;">
+                            <h2 style="color: white; margin: 0;">Ingreso de Equipo Confirmado</h2>
+                        </div>
+                        <div style="padding: 30px; line-height: 1.6;">
+                            <p>Hola <strong>${ticket.clientName}</strong>,</p>
+                            <p>Tu equipo ha sido ingresa
+
+do exitosamente a nuestro laboratorio técnico de <strong>${settings.businessName || 'nuestra empresa'}</strong>.</p>
+                            <p>Adjuntamos el comprobante oficial en PDF con los detalles del ingreso.</p>
+                            <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                                <strong>Orden de Servicio:</strong> #${ticket.id}<br>
+                                <strong>Equipo:</strong> ${ticket.brand} ${ticket.model}
+                            </div>
+                            <p>Te mantendremos informado sobre el avance del diagnóstico.</p>
+                        </div>
+                    </div>
+                `,
+                attachments: [
+                    {
+                        filename: `Comprobante-Ingreso-${ticket.id}.pdf`,
+                        content: pdfContent
+                    }
+                ]
+            });
+            console.log(`[EMAIL] Success: Intake receipt sent to ${targetEmail}`);
+            res.json({ success: true, message: `Comprobante enviado a ${targetEmail}` });
+        } catch (mailError) {
+            console.error(`[EMAIL] Transport failure:`, mailError.message);
+            res.status(502).json({ error: `Error en el servidor de correos: ${mailError.message}` });
+        }
 
     } catch (error) {
-        console.error('Error sending intake receipt:', error);
-        res.status(500).json({ error: error.message });
+        console.error(`[EMAIL] General 500 Error for Ticket #${ticketId}:`, error);
+        res.status(500).json({ error: `Error interno al enviar comprobante: ${error.message}` });
     }
+};
+// Added missing exports for administrative audit
+
+export const getReceipts = (req, res) => {
+    const query = `
+        SELECT t.*, u.name as technicianName 
+        FROM tickets t 
+        LEFT JOIN users u ON t.assignedTo = u.id 
+        ORDER BY t.createdAt DESC 
+        LIMIT 100
+    `;
+    db.all(query, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows);
+    });
+};
+
+export const createReceipt = (req, res) => {
+    const { clientName, clientPhone, clientEmail, brand, model, issueDescription } = req.body;
+    const createdAt = new Date().toISOString();
+    
+    const sql = `INSERT INTO tickets (clientName, clientPhone, clientEmail, brand, model, issueDescription, createdAt, status) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'RECEIVED')`;
+    
+    db.run(sql, [clientName, clientPhone, clientEmail, brand, model, issueDescription, createdAt], function(err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, id: this.lastID });
+    });
+};
+
+export const generatePDF = (req, res) => {
+    const { id } = req.params;
+    
+    const settingsKeys = ['businessName', 'businessAddress', 'whatsappNumber', 'businessEmail', 'businessDomain'];
+    const settings = {};
+    
+    const fetchData = async () => {
+        for (const key of settingsKeys) {
+            settings[key] = await getSetting(key);
+        }
+        
+        return new Promise((resolve) => {
+            const query = `
+                SELECT t.*, u.name as technicianName 
+                FROM tickets t 
+                LEFT JOIN users u ON t.assignedTo = u.id 
+                WHERE t.id = ?
+            `;
+            db.get(query, [id], (err, row) => {
+                if (err || !row) return resolve(null);
+                db.all('SELECT * FROM ticket_evidence WHERE ticket_id = ?', [id], (evErr, evRows) => {
+                    row.dbEvidence = evRows || [];
+                    resolve(row);
+                });
+            });
+        });
+    };
+    
+    fetchData().then(ticket => {
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado' });
+        
+        const doc = new PDFDocument({ size: 'A4', margin: 50 });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename=Comprobante-Ingreso-${ticket.id}.pdf`);
+        doc.pipe(res);
+        
+        const businessName = settings.businessName || 'LA BODEGA DEL COMPUTADOR';
+        const businessAddress = settings.businessAddress || 'Cl. 49 #13-13, Barrancabermeja';
+        const businessPhone = settings.whatsappNumber || '+57 317 653 2488';
+        const businessEmail = settings.businessEmail || 'ventas@labodegadelcomputador.com';
+        
+        // Header
+        doc.fillColor('#1e293b').fontSize(20).text(businessName, { align: 'center' });
+        doc.fillColor('#64748b').fontSize(10).text('DEL COMPUTADOR', { align: 'center' });
+        doc.moveDown();
+        doc.fillColor('#2563eb').fontSize(16).text(`Orden de Servicio No. #${ticket.id}`, { align: 'center' });
+        doc.moveDown(2);
+        
+        // Línea divisoria
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').stroke();
+        doc.moveDown();
+        
+        // Cliente info
+        doc.fillColor('#2563eb').fontSize(12).text('CLIENTE', 50);
+        doc.moveDown(0.5);
+        doc.fillColor('#1e293b').fontSize(11);
+        doc.text(`Nombre: ${ticket.clientName || 'N/A'}`);
+        doc.text(`Teléfono: ${ticket.clientPhone || 'N/A'}`);
+        doc.text(`Email: ${ticket.clientEmail || 'N/A'}`);
+        doc.text(`Fecha: ${new Date(ticket.createdAt).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`);
+        doc.moveDown();
+        
+        // Equipo info
+        doc.fillColor('#2563eb').fontSize(12).text('EQUIPO', 50);
+        doc.moveDown(0.5);
+        doc.fillColor('#1e293b').fontSize(11);
+        doc.text(`Tipo: ${ticket.deviceType || 'Equipo'}`);
+        doc.text(`Marca: ${ticket.brand || 'Genérico'}`);
+        doc.text(`Modelo: ${ticket.model || 'N/A'}`);
+        doc.text(`Serial: ${ticket.serial || 'S/N'}`);
+        doc.moveDown();
+        
+        // Descripción
+        doc.fillColor('#2563eb').fontSize(12).text('DESCRIPCIÓN DEL PROBLEMA', 50);
+        doc.moveDown(0.5);
+        doc.fillColor('#475569').fontSize(10);
+        doc.text(ticket.issueDescription || 'Sin descripción', { width: 495 });
+        doc.moveDown();
+
+        // Evidencia fotográfica
+        if (ticket.dbEvidence && ticket.dbEvidence.length > 0) {
+            doc.moveDown();
+            doc.fillColor('#2563eb').fontSize(12).text('EVIDENCIA FOTOGRÁFICA', 50);
+            doc.moveDown(0.5);
+            
+            const imgWidth = 160;
+            const imgHeight = 120;
+            let xPos = 50;
+            let yPos = doc.y;
+            
+            for (const evidence of ticket.dbEvidence) {
+                if (evidence.photo_data) {
+                    try {
+                        const imgBuffer = Buffer.from(evidence.photo_data, 'base64');
+                        doc.image(imgBuffer, xPos, yPos, { width: imgWidth, height: imgHeight });
+                        xPos += imgWidth + 10;
+                        if (xPos > 400) {
+                            xPos = 50;
+                            yPos += imgHeight + 10;
+                        }
+                    } catch (imgErr) {
+                        console.error('Error adding image to PDF:', imgErr);
+                    }
+                }
+            }
+            doc.moveDown(2);
+        }
+        
+        doc.moveDown();
+        
+        // Firmas
+        doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#e2e8f0').stroke();
+        doc.moveDown();
+        
+        doc.fillColor('#1e293b').fontSize(10);
+        doc.text('Entregado por:', 50);
+        doc.moveDown();
+        doc.moveTo(50, doc.y).lineTo(200, doc.y).strokeColor('#1e293b').stroke();
+        doc.text(ticket.technicianName || 'Recepción', 50);
+        
+        doc.text('Recibido por:', 350);
+        doc.moveTo(350, doc.y - 5).lineTo(500, doc.y - 5).strokeColor('#1e293b').stroke();
+        doc.text(ticket.clientName || 'Firma Cliente', 350);
+        
+        doc.moveDown(3);
+        
+        // Footer
+        doc.fillColor('#64748b').fontSize(8).text(`PBX: ${businessPhone} | ${businessAddress} | ${businessEmail}`, { align: 'center' });
+        
+        doc.end();
+    });
 };

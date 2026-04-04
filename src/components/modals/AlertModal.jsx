@@ -42,7 +42,7 @@ const AlertModal = ({
     const Icon = config.icon;
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-fade-in">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10000] flex items-center justify-center p-4 animate-fade-in">
             <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl animate-scale-in">
                 {/* Header */}
                 <div className="p-6 flex items-start gap-4">

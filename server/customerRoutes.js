@@ -1,6 +1,6 @@
-// Customer Management Endpoints - IMPROVED
 import { db } from './db.js';
 import { validators } from './validationUtils.js';
+import * as XLSX from 'xlsx';
 
 // Get all customers with stats
 export const getCustomers = (req, res) => {
@@ -223,7 +223,7 @@ export const createCustomer = async (req, res) => {
         return res.status(400).json({ error: `Tipo debe ser: ${validTypes.join(', ')}` });
     }
 
-    const sql = 'INSERT INTO customers (name, email, phone, address, idNumber, customerType, notes, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    const sql = 'INSERT INTO customers (name, email, phone, address, idNumber, customerType, notes, status, birthday, totalSpent, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     const now = new Date().toISOString();
 
     db.run(sql, [
@@ -235,6 +235,8 @@ export const createCustomer = async (req, res) => {
         customerType || 'Regular', 
         notes ? notes.trim() : null,
         'active',
+        birthday || null,
+        0,
         now, 
         now
     ], function (err) {
@@ -266,7 +268,7 @@ export const createCustomer = async (req, res) => {
 // Update customer with validation and audit
 export const updateCustomer = async (req, res) => {
     const customerId = req.params.id;
-    const { name, email, phone, address, idNumber, customerType, notes, status } = req.body;
+    const { name, email, phone, address, idNumber, customerType, notes, status, birthday, totalSpent, lastPurchaseDate } = req.body;
 
     // Validar ID
     if (!customerId || isNaN(customerId)) {
@@ -337,6 +339,9 @@ export const updateCustomer = async (req, res) => {
     if (customerType !== undefined) { updates.push('customerType = ?'); params.push(customerType); }
     if (notes !== undefined) { updates.push('notes = ?'); params.push(notes ? notes.trim() : null); }
     if (status !== undefined) { updates.push('status = ?'); params.push(status); }
+    if (birthday !== undefined) { updates.push('birthday = ?'); params.push(birthday || null); }
+    if (totalSpent !== undefined) { updates.push('totalSpent = ?'); params.push(totalSpent); }
+    if (lastPurchaseDate !== undefined) { updates.push('lastPurchaseDate = ?'); params.push(lastPurchaseDate || null); }
 
     updates.push('updatedAt = ?');
     params.push(new Date().toISOString());
@@ -497,7 +502,10 @@ export const searchCustomers = (req, res) => {
             name: c.name,
             email: c.email,
             phone: c.phone,
+            address: c.address,
+            idNumber: c.idNumber,
             customerType: c.customerType,
+            notes: c.notes,
             status: c.status,
             totalTickets: c.totalTickets,
             totalSpent: c.totalSpent,
@@ -550,5 +558,260 @@ export const getCustomerStats = (req, res) => {
                 general: general
             });
         });
+    });
+};
+
+// Import customers from Excel
+export const importCustomers = async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ error: 'No se subió ningún archivo' });
+    }
+
+    try {
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(worksheet);
+
+        if (data.length === 0) {
+            return res.status(400).json({ error: 'El archivo Excel está vacío' });
+        }
+
+        let createdCount = 0;
+        let updatedCount = 0;
+        let errorCount = 0;
+        const errors = [];
+
+        // Map column names to DB fields
+        const columnMap = {
+            'Nombre': 'name',
+            'Nombre Completo': 'name',
+            'Name': 'name',
+            'Email': 'email',
+            'Correo': 'email',
+            'Teléfono': 'phone',
+            'Telefono': 'phone',
+            'Celular': 'phone',
+            'Phone': 'phone',
+            'Dirección': 'address',
+            'Direccion': 'address',
+            'Address': 'address',
+            'Cédula': 'idNumber',
+            'Cedula': 'idNumber',
+            'NIT': 'idNumber',
+            'ID': 'idNumber',
+            'Tipo': 'customerType',
+            'Tipo de Cliente': 'customerType',
+            'Notas': 'notes',
+            'Observaciones': 'notes'
+        };
+
+        const now = new Date().toISOString();
+
+        for (const [index, row] of data.entries()) {
+            try {
+                // Normalize row keys
+                const customer = {};
+                Object.keys(row).forEach(key => {
+                    const normalizedKey = columnMap[key] || key.toLowerCase();
+                    if (['name', 'email', 'phone', 'address', 'idNumber', 'customerType', 'notes'].includes(normalizedKey)) {
+                        customer[normalizedKey] = row[key]?.toString().trim() || null;
+                    }
+                });
+
+                if (!customer.name) {
+                    errorCount++;
+                    errors.push(`Fila ${index + 2}: El nombre es obligatorio.`);
+                    continue;
+                }
+
+                // Search for existing customer
+                const existing = await new Promise((resolve) => {
+                    let sqlParts = [];
+                    let params = [];
+                    
+                    // User requested identifying by cedula/nit primarily
+                    if (customer.idNumber) { 
+                        sqlParts.push('idNumber = ?'); 
+                        params.push(customer.idNumber); 
+                    }
+                    
+                    // Fallback to email or phone if idNumber not provided or not found?
+                    // Actually, let's stick to idNumber as main, but allow email/phone as secondaries
+                    if (customer.email) { 
+                        sqlParts.push('email = ?'); 
+                        params.push(customer.email.toLowerCase()); 
+                    }
+                    if (customer.phone) { 
+                        sqlParts.push('phone = ?'); 
+                        params.push(customer.phone); 
+                    }
+                    
+                    if (params.length === 0) return resolve(null);
+                    
+                    const sql = `SELECT id FROM customers WHERE ${sqlParts.join(' OR ')} LIMIT 1`;
+                    db.get(sql, params, (err, row) => resolve(row));
+                });
+
+                if (existing) {
+                    // Update
+                    const updates = [];
+                    const params = [];
+                    Object.keys(customer).forEach(key => {
+                        if (customer[key] !== null) {
+                            updates.push(`${key} = ?`);
+                            params.push(key === 'email' ? customer[key].toLowerCase() : customer[key]);
+                        }
+                    });
+                    params.push(now, existing.id);
+
+                    await new Promise((resolve, reject) => {
+                        db.run(`UPDATE customers SET ${updates.join(', ')}, updatedAt = ? WHERE id = ?`, params, function(err) {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+                    updatedCount++;
+                } else {
+                    // Create
+                    const fields = ['name', 'email', 'phone', 'address', 'idNumber', 'customerType', 'notes', 'status', 'createdAt', 'updatedAt'];
+                    const values = [
+                        customer.name,
+                        customer.email ? customer.email.toLowerCase() : null,
+                        customer.phone,
+                        customer.address,
+                        customer.idNumber,
+                        customer.customerType || 'Regular',
+                        customer.notes,
+                        'active',
+                        now,
+                        now
+                    ];
+                    const placeholders = fields.map(() => '?').join(', ');
+
+                    await new Promise((resolve, reject) => {
+                        db.run(`INSERT INTO customers (${fields.join(', ')}) VALUES (${placeholders})`, values, function(err) {
+                            if (err) reject(err);
+                            else resolve();
+                        });
+                    });
+                    createdCount++;
+                }
+            } catch (err) {
+                errorCount++;
+                errors.push(`Fila ${index + 2}: ${err.message}`);
+            }
+        }
+
+        // Log the activity
+        db.run(
+            'INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)',
+            [req.user?.id || 0, 'IMPORT', 'CUSTOMERS', `Importación Excel: ${createdCount} creados, ${updatedCount} actualizados`, now]
+        );
+
+        res.json({
+            success: true,
+            created: createdCount,
+            updated: updatedCount,
+            errors: errorCount,
+            details: errors
+        });
+
+    } catch (error) {
+        res.status(500).json({ error: 'Error al procesar el archivo Excel: ' + error.message });
+    }
+};
+
+// Get customers with birthdays in current month
+export const getBirthdayCustomers = (req, res) => {
+    const now = new Date();
+    const currentMonth = (now.getMonth() + 1).toString().padStart(2, '0');
+    
+    const sql = `
+        SELECT id, name, email, phone, birthday, customerType, totalSpent 
+        FROM customers 
+        WHERE birthday IS NOT NULL 
+        AND birthday != ''
+        AND CAST(strftime('%m', birthday) AS INTEGER) = ?
+        ORDER BY CAST(strftime('%d', birthday) AS INTEGER)
+    `;
+    
+    db.all(sql, [currentMonth], (err, rows) => {
+        if (err) {
+            console.error('[Customers] Birthday Query Error:', err.message);
+            return res.status(500).json({ error: 'Error al consultar cumpleaños: ' + err.message });
+        }
+        
+        // Defensive mapping to ensure data consistency
+        const customersWithBirthdayInfo = (rows || []).map(c => {
+            let bDay = 1;
+            try {
+                if (c.birthday && c.birthday.includes('-')) {
+                    bDay = new Date(c.birthday).getUTCDate();
+                }
+            } catch (e) {
+                console.warn(`[Customers] Invalid birthday format for ID ${c.id}: ${c.birthday}`);
+            }
+
+            return {
+                ...c,
+                birthdayDay: bDay,
+                daysUntilBirthday: 0 // Could be calculated if needed
+            };
+        });
+        
+        res.json({
+            success: true,
+            month: now.toLocaleString('es-CO', { month: 'long' }),
+            count: customersWithBirthdayInfo.length,
+            customers: customersWithBirthdayInfo
+        });
+    });
+};
+
+// Export Customers
+export const exportCustomers = (req, res) => {
+    const { format = 'json' } = req.query;
+    
+    const sql = `
+        SELECT c.*, 
+               COUNT(DISTINCT t.id) as totalTickets,
+               SUM(t.estimatedCost) as totalSpent,
+               MAX(t.createdAt) as lastVisit
+        FROM customers c
+        LEFT JOIN tickets t ON c.phone = t.clientPhone OR c.name = t.clientName
+        GROUP BY c.id
+        ORDER BY c.name ASC
+    `;
+    
+    db.all(sql, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
+        const headers = ['ID', 'Nombre', 'Email', 'Teléfono', 'Dirección', 'Ciudad', 'Cumpleaños', 'Tipo', 'Estado', 'Total_Servicios', 'Total_Gastado', 'Última_Visita', 'Notas'];
+        const csvRows = rows.map(row => [
+            row.id,
+            row.name,
+            row.email || '',
+            row.phone || '',
+            row.address || '',
+            row.city || '',
+            row.birthday || '',
+            row.customerType || 'Retail',
+            row.status || 'active',
+            row.totalTickets || 0,
+            row.totalSpent || 0,
+            row.lastVisit || '',
+            `"${(row.notes || '').replace(/"/g, '""')}"`
+        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
+        
+        const csvContent = headers.join(',') + '\n' + csvRows.join('\n');
+        
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=clientes_export.csv');
+        res.send('\ufeff' + csvContent);
     });
 };

@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import Button from './Button';
 import { ArrowRight, Zap, Shield, Truck } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
+import { buildUploadUrl } from '../config/config';
 
 const Hero = () => {
     const { settings } = useSettings();
@@ -114,18 +115,13 @@ const Hero = () => {
                     transition={{ duration: 0.7, delay: 0.2 }}
                 >
                     <div className="relative w-full max-w-[500px] lg:max-w-[550px]">
-                        {/* Background gradient blob */}
-                        <motion.div
-                            className="absolute -inset-8 bg-gradient-to-tr from-gray-100 via-gray-50 to-white rounded-[3rem] blur-2xl opacity-80"
-                            initial={{ scale: 0.9, rotate: 0 }}
-                            animate={{ scale: [0.9, 1.05, 1], rotate: [0, 2, 0] }}
-                            transition={{ duration: 6, repeat: Infinity, repeatType: 'reverse', ease: 'easeInOut' }}
-                        />
+                        {/* Background gradient blob - Static for performance (Blur is expensive) */}
+                        <div className="absolute -inset-8 bg-gradient-to-tr from-gray-100 via-gray-50 to-white rounded-[3rem] blur-2xl opacity-80" style={{ willChange: 'transform' }} />
 
                         {/* Image container with border */}
                         <div className="relative z-10 bg-white rounded-3xl p-6 shadow-2xl shadow-gray-200/50 border border-gray-100">
                             <motion.img
-                                src={settings.heroImage || '/src/assets/hero_laptop.png'}
+                                src={buildUploadUrl(settings.heroImage) || '/src/assets/hero_laptop.png'}
                                 alt="Portátil Premium"
                                 className="w-full h-auto object-contain"
                                 whileHover={{ scale: 1.03 }}
@@ -138,6 +134,7 @@ const Hero = () => {
                             className="absolute -top-4 -right-4 lg:top-4 lg:-right-6 bg-black text-white px-5 py-3 rounded-2xl shadow-xl z-20"
                             animate={{ y: [0, -8, 0] }}
                             transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                            style={{ willChange: 'transform' }}
                         >
                             <span className="font-bold text-sm">Nuevos Arribos</span>
                         </motion.div>
@@ -147,6 +144,7 @@ const Hero = () => {
                             className="absolute -bottom-3 -left-3 lg:bottom-8 lg:-left-8 bg-white px-4 py-2 rounded-xl shadow-lg border border-gray-100 z-20"
                             animate={{ y: [0, 6, 0] }}
                             transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+                            style={{ willChange: 'transform' }}
                         >
                             <span className="text-xs font-semibold text-gray-600">+200 productos</span>
                         </motion.div>

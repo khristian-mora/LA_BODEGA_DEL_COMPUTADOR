@@ -6,10 +6,10 @@ const isDevelopment =
     window.location.hostname === '127.0.0.1';
 
 export const API_CONFIG = {
-    // En desarrollo usa localhost:3000, en producción usa rutas relativas (proxy de Vite/Nginx)
-    BASE_URL: isDevelopment ? 'http://localhost:3000' : '',
-    API_URL: isDevelopment ? 'http://localhost:3000/api' : '/api',
-    UPLOADS_URL: isDevelopment ? 'http://localhost:3000/uploads' : '/uploads'
+    // Usamos rutas relativas para que el proxy de Vite maneje la comunicación con el backend
+    BASE_URL: '',
+    API_URL: '/api',
+    UPLOADS_URL: '/uploads'
 };
 
 // Helper function para construir URLs de API
@@ -41,6 +41,11 @@ export const buildUploadUrl = (path) => {
     // Si empieza con /uploads, usar tal cual en producción o agregar base en desarrollo
     if (path.startsWith('/uploads')) {
         return isDevelopment ? `${API_CONFIG.BASE_URL}${path}` : path;
+    }
+
+    // Si es un recurso local del frontend (src/ assets), no anteponer /uploads
+    if (path.startsWith('/src') || path.startsWith('src/')) {
+        return path;
     }
 
     // Si no, asumir que es un path relativo dentro de uploads

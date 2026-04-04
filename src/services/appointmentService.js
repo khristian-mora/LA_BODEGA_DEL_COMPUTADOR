@@ -91,12 +91,11 @@ export const getAppointments = async (params = {}) => {
     return response.json();
 };
 
-// Get appointment statistics
 export const getAppointmentStats = async (period = 'month') => {
     const token = localStorage.getItem('adminToken');
     const headers = { 'Authorization': `Bearer ${token}` };
 
-    const response = await fetch(`${API_URL}/stats?period=${period}`, { headers });
+    const response = await fetch(buildApiUrl(`/reports/appointments?period=${period}`), { headers });
     
     if (!response.ok) {
         const error = await response.json();

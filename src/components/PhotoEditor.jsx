@@ -152,8 +152,8 @@ const PhotoEditor = ({ imageUrl, onSave, onCancel }) => {
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] w-full max-w-5xl">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] w-full max-w-6xl">
                 {/* Header */}
                 <div className="bg-gray-800 text-white p-4 flex justify-between items-center">
                     <h3 className="font-bold text-lg flex items-center gap-2">

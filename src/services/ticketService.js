@@ -1,26 +1,40 @@
-import { API_CONFIG } from '../config/config';
-
-const API_URL = API_CONFIG.API_URL;
+import { buildApiUrl, API_CONFIG } from '../config/config';
 
 export const ticketService = {
     getTickets: async () => {
         try {
-            const response = await fetch(`${API_URL}/tickets`, {
+            const response = await fetch(buildApiUrl('/api/tickets'), {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
                 }
             });
             if (!response.ok) throw new Error('Failed to fetch tickets');
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.tickets || data.data || []);
+        } catch (error) {
+            console.error('Error fetching tickets:', error);
+            return [];
+        }
+    },
+
+    getTicket: async (id) => {
+        try {
+            const response = await fetch(buildApiUrl(`/api/tickets/${id}`), {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                }
+            });
+            if (!response.ok) throw new Error('Failed to fetch ticket');
             return await response.json();
         } catch (error) {
-            console.error(error);
-            return [];
+            console.error('Error fetching ticket:', error);
+            return null;
         }
     },
 
     createTicket: async (ticketData) => {
         try {
-            const response = await fetch(`${API_URL}/tickets`, {
+            const response = await fetch(buildApiUrl('/api/tickets'), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -28,16 +42,20 @@ export const ticketService = {
                 },
                 body: JSON.stringify(ticketData)
             });
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || 'Error al crear ticket');
+            }
             return await response.json();
         } catch (error) {
-            console.error(error);
-            return null;
+            console.error('Error creating ticket:', error);
+            throw error;
         }
     },
 
     updateTicket: async (id, data) => {
         try {
-            await fetch(`${API_URL}/tickets/${id}`, {
+            const response = await fetch(buildApiUrl(`/api/tickets/${id}`), {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -45,10 +63,14 @@ export const ticketService = {
                 },
                 body: JSON.stringify(data)
             });
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || 'Error al actualizar ticket');
+            }
             return { success: true };
         } catch (error) {
-            console.error(error);
-            return { success: false };
+            console.error('Error updating ticket:', error);
+            return { success: false, error: error.message };
         }
     },
 
@@ -61,16 +83,52 @@ export const ticketService = {
 
     getTechnicians: async () => {
         try {
-            const response = await fetch(`${API_URL}/technicians`, {
+            const response = await fetch(buildApiUrl('/api/technicians'), {
                 headers: {
                     'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
                 }
             });
             if (!response.ok) throw new Error('Failed to fetch technicians');
-            return await response.json();
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.technicians || data.data || []);
         } catch (error) {
-            console.error(error);
+            console.error('Error fetching technicians:', error);
             return [];
+        }
+    },
+
+    getProducts: async () => {
+        try {
+            const response = await fetch(buildApiUrl('/api/products'), {
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                }
+            });
+            if (!response.ok) throw new Error('Failed to fetch products');
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.products || data.data || []);
+        } catch (error) {
+            console.error('Error fetching products:', error);
+            return [];
+        }
+    },
+
+    deleteTicket: async (id) => {
+        try {
+            const response = await fetch(buildApiUrl(`/api/tickets/${id}`), {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                }
+            });
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || 'Error al eliminar ticket');
+            }
+            return { success: true };
+        } catch (error) {
+            console.error('Error deleting ticket:', error);
+            return { success: false, error: error.message };
         }
     }
 };

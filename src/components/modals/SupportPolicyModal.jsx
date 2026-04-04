@@ -144,7 +144,7 @@ const SupportPolicyModal = ({ isOpen, onClose, type }) => {
 
     return (
         <AnimatePresence>
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[10000] flex items-center justify-center p-4">
                 <motion.div 
                     className="bg-white rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
                     initial={{ opacity: 0, scale: 0.9, y: 20 }}

@@ -5,6 +5,7 @@ import Button from '../components/Button';
 import ProductCard from '../components/ProductCard';
 import { useShop } from '../context/ShopContext';
 import { ChevronRight, CheckCircle, Smartphone, Cpu, CircuitBoard, HardDrive, Box, Zap } from 'lucide-react';
+import { buildUploadUrl, PLACEHOLDER_IMAGE } from '../config/config';
 
 const Builder = () => {
     const { products, addToCart, formatPrice } = useShop();
@@ -44,14 +45,12 @@ const Builder = () => {
         }, 300);
     };
 
-    // Filter products for current step
     // Filter products for current step using builderCategory
-    const getStepProducts = () => {
+    const stepProducts = useMemo(() => {
         const step = steps[currentStep];
         if (!step) return [];
-
         return products.filter(p => p.builderCategory === step.builderCategory);
-    };
+    }, [products, currentStep]);
 
     // Finalize Build
     const handleAddBuildToCart = () => {
@@ -167,14 +166,19 @@ const Builder = () => {
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                                {getStepProducts().map((product, _index) => (
+                                {stepProducts.map((product, _index) => (
                                     <div
                                         key={product.id}
                                         onClick={() => handleSelect(product)}
                                         className={`cursor-pointer group relative bg-white rounded-2xl p-4 shadow-sm border-2 transition-all hover:shadow-xl hover:-translate-y-1 ${build[steps[currentStep].id]?.id === product.id ? 'border-green-500 ring-2 ring-green-100' : 'border-transparent hover:border-black'}`}
                                     >
                                         <div className="aspect-square bg-gray-50 rounded-xl mb-4 overflow-hidden p-4">
-                                            <img src={product.image} alt={product.name} className="w-full h-full object-contain mix-blend-multiply transition-transform group-hover:scale-110" />
+                                            <img 
+                                                src={buildUploadUrl(product.image) || PLACEHOLDER_IMAGE} 
+                                                alt={product.name} 
+                                                className="w-full h-full object-contain mix-blend-multiply transition-transform group-hover:scale-110" 
+                                                onError={(e) => { e.target.src = PLACEHOLDER_IMAGE; }}
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <h3 className="font-bold text-gray-900 leading-tight">{product.name}</h3>

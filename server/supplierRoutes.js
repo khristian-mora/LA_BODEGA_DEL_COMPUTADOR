@@ -1,4 +1,5 @@
-import { db } from './db.js';
+import { db, logActivity } from './db.js';
+import * as XLSX from 'xlsx';
 
 // Get all suppliers with pagination, filtering, and search
 export const getSuppliers = (req, res) => {
@@ -243,11 +244,24 @@ export const createSupplier = (req, res) => {
     }
     
     if (phone && !isValidPhone(phone)) {
-        return res.status(400).json({ error: 'Teléfono inválido (formato colombiano: +573XXXXXXXXX)' });
+        console.warn('[SUPPLIER] Phone validation failed:', phone);
+        return res.status(400).json({ 
+            error: 'Teléfono inválido', 
+            details: 'Se esperan de 7 a 10 dígitos (el prefijo +57 es opcional). Ejemplo: 6012345678 o 3112345678' 
+        });
     }
     
-    if (website && !isValidUrl(website)) {
-        return res.status(400).json({ error: 'URL del sitio web inválida' });
+    let processedWebsite = website;
+    if (website && !website.startsWith('http')) {
+        processedWebsite = `https://${website}`;
+    }
+    
+    if (processedWebsite && !isValidUrl(processedWebsite)) {
+        console.warn('[SUPPLIER] URL validation failed:', processedWebsite);
+        return res.status(400).json({ 
+            error: 'URL inválida', 
+            details: 'La dirección web no tiene un formato válido (ej: www.ejemplo.com)' 
+        });
     }
 
     const sql = `INSERT INTO suppliers (name, contact, email, phone, category, notes, website, taxId, paymentTerms, address, status, createdAt)
@@ -259,7 +273,7 @@ export const createSupplier = (req, res) => {
         phone || '', 
         category || '', 
         notes || '',
-        website || null,
+        processedWebsite || null,
         taxId || null,
         paymentTerms || null,
         address || null
@@ -273,8 +287,17 @@ export const createSupplier = (req, res) => {
             return res.status(500).json({ error: err.message });
         }
         
-        // Log activity
-        logActivity(req.user.id, 'CREATE', 'suppliers', `Proveedor creado: ${name.trim()}`);
+        // Log activity safely
+        const userId = req.user?.id || 0;
+        logActivity({
+            userId,
+            action: 'CREATE',
+            module: 'suppliers',
+            entityType: 'supplier',
+            entityId: this.lastID,
+            newValue: { name: name.trim(), email, phone },
+            req
+        });
         
         res.status(201).json({ 
             id: this.lastID, 
@@ -284,10 +307,9 @@ export const createSupplier = (req, res) => {
             phone, 
             category, 
             notes,
-            website,
-            taxId,
             paymentTerms,
             address,
+            website: processedWebsite,
             status: 'active'
         });
     });
@@ -316,7 +338,12 @@ export const updateSupplier = (req, res) => {
             return res.status(400).json({ error: 'Teléfono inválido' });
         }
         
-        if (website && !isValidUrl(website)) {
+        let processedWebsite = website;
+        if (website && !website.startsWith('http')) {
+            processedWebsite = `https://${website}`;
+        }
+        
+        if (processedWebsite && !isValidUrl(processedWebsite)) {
             return res.status(400).json({ error: 'URL del sitio web inválida' });
         }
         
@@ -335,7 +362,7 @@ export const updateSupplier = (req, res) => {
         if (category !== undefined) { updates.push('category = ?'); params.push(category); }
         if (notes !== undefined) { updates.push('notes = ?'); params.push(notes); }
         if (status !== undefined) { updates.push('status = ?'); params.push(status); }
-        if (website !== undefined) { updates.push('website = ?'); params.push(website); }
+        if (processedWebsite !== undefined) { updates.push('website = ?'); params.push(processedWebsite); }
         if (taxId !== undefined) { updates.push('taxId = ?'); params.push(taxId); }
         if (paymentTerms !== undefined) { updates.push('paymentTerms = ?'); params.push(paymentTerms); }
         if (address !== undefined) { updates.push('address = ?'); params.push(address); }
@@ -358,8 +385,17 @@ export const updateSupplier = (req, res) => {
             }
             if (this.changes === 0) return res.status(404).json({ error: 'Proveedor no encontrado' });
             
-            // Log activity
-            logActivity(req.user.id, 'UPDATE', 'suppliers', `Proveedor actualizado: ${name || existing.name}`);
+            // Log activity safely
+            const userId = req.user?.id || 0;
+            logActivity({
+                userId,
+                action: 'UPDATE',
+                module: 'suppliers',
+                entityType: 'supplier',
+                entityId: id,
+                newValue: { name, email, phone, status },
+                req
+            });
             
             res.json({ success: true, id: parseInt(id), ...req.body });
         });
@@ -388,6 +424,11 @@ export const exportSuppliers = (req, res) => {
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
+        const { format = 'csv' } = req.query;
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
         // Convert to CSV
         const headers = ['ID', 'Nombre', 'Contacto', 'Email', 'Teléfono', 'Categoría', 'Sitio Web', 'NIT', 'Condiciones Pago', 'Dirección', 'Notas', 'Estado', 'Creado'];
         const csvRows = rows.map(row => [
@@ -447,6 +488,114 @@ export const deleteSupplier = (req, res) => {
     });
 };
 
+// Bulk import suppliers from Excel (Standard Mapping)
+export const importSuppliers = (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo' });
+
+    try {
+        const workbook = XLSX.read(req.file.buffer, { type: 'buffer' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const data = XLSX.utils.sheet_to_json(worksheet);
+
+        if (data.length === 0) return res.status(400).json({ error: 'El archivo está vacío' });
+
+        const columnMap = {
+            'Nombre': 'name',
+            'Name': 'name',
+            'Proveedor': 'name',
+            'Supplier': 'name',
+            'Email': 'email',
+            'Correo': 'email',
+            'Mail': 'email',
+            'Teléfono': 'phone',
+            'Telefono': 'phone',
+            'Celular': 'phone',
+            'Phone': 'phone',
+            'Contacto': 'contact',
+            'Contact': 'contact',
+            'Categoría': 'category',
+            'Category': 'category',
+            'NIT': 'taxId',
+            'Tax ID': 'taxId',
+            'Identificación': 'taxId',
+            'Dirección': 'address',
+            'Address': 'address',
+            'Notas': 'notes',
+            'Observaciones': 'notes',
+            'Web': 'website',
+            'Sitio Web': 'website'
+        };
+
+        let created = 0;
+        let updated = 0;
+        let errors = 0;
+
+        const processRow = async (row) => {
+            const mappedRow = {};
+            Object.keys(row).forEach(key => {
+                const targetKey = columnMap[key] || Object.keys(columnMap).find(k => key.toLowerCase().includes(k.toLowerCase()) && columnMap[k]);
+                if (targetKey && columnMap[targetKey]) {
+                    mappedRow[columnMap[targetKey]] = row[key];
+                }
+            });
+
+            const { name, email, phone, contact, category, notes, taxId, website, address } = mappedRow;
+
+            if (!name) {
+                errors++;
+                return;
+            }
+
+            return new Promise((resolve) => {
+                // Upsert logic: Check by email or name
+                const findSql = email 
+                    ? 'SELECT id FROM suppliers WHERE email = ?' 
+                    : 'SELECT id FROM suppliers WHERE name = ?';
+                const findParam = email || name;
+
+                db.get(findSql, [findParam], (err, existing) => {
+                    if (existing) {
+                        const updateSql = `UPDATE suppliers SET 
+                                            contact = COALESCE(?, contact), 
+                                            phone = COALESCE(?, phone), 
+                                            category = COALESCE(?, category), 
+                                            notes = COALESCE(?, notes),
+                                            taxId = COALESCE(?, taxId),
+                                            website = COALESCE(?, website),
+                                            address = COALESCE(?, address),
+                                            updatedAt = datetime('now')
+                                          WHERE id = ?`;
+                        db.run(updateSql, [contact, phone, category, notes, taxId, website, address, existing.id], (err) => {
+                            if (!err) updated++;
+                            resolve();
+                        });
+                    } else {
+                        const insertSql = `INSERT INTO suppliers (name, contact, email, phone, category, notes, taxId, website, address, status, createdAt)
+                                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', datetime('now'))`;
+                        db.run(insertSql, [name, contact, email, phone, category, notes, taxId, website, address], (err) => {
+                            if (!err) created++;
+                            resolve();
+                        });
+                    }
+                });
+            });
+        };
+
+        const executeImports = async () => {
+            for (const row of data) {
+                await processRow(row);
+            }
+            logActivity(req.user.id, 'IMPORT', 'suppliers', `Importación: ${created} creados, ${updated} actualizados`);
+            res.json({ success: true, created, updated, errors });
+        };
+
+        executeImports();
+    } catch (error) {
+        res.status(500).json({ error: 'Error al procesar: ' + error.message });
+    }
+};
+
 // Helper validation functions
 const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -455,8 +604,10 @@ const isValidEmail = (email) => {
 
 const isValidPhone = (phone) => {
     if (!phone) return true;
-    const phoneRegex = /^(\+57|57)?[3][0-9]{9}$/;
-    return phoneRegex.test(phone.replace(/\s|-/g, ''));
+    const cleanPhone = phone.replace(/\s|-|\(|\)/g, '');
+    // Allow Colombian landlines or mobiles (7 to 10 digits) with optional +57 prefix
+    const phoneRegex = /^(?:\+57|57)?\d{7,10}$/;
+    return phoneRegex.test(cleanPhone);
 };
 
 const isValidUrl = (url) => {
@@ -468,11 +619,4 @@ const isValidUrl = (url) => {
     }
 };
 
-// Helper function to log activity
-const logActivity = (userId, action, module, details) => {
-    const timestamp = new Date().toISOString();
-    const sql = `INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)`;
-    db.run(sql, [userId, action, module, details, timestamp], (err) => {
-        if (err) console.error('[ACTIVITY LOG] Error:', err.message);
-    });
-};
+// logActivity is now imported from db.js

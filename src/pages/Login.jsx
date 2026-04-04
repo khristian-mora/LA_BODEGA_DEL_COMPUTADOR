@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Button from '../components/Button';
-import { Mail, Lock, ShieldCheck, Monitor } from 'lucide-react';
+import { Mail, Lock, ShieldCheck, Monitor, ArrowLeft } from 'lucide-react';
+import GoogleLoginButton from '../components/GoogleLoginButton';
 
 const Login = () => {
     const navigate = useNavigate();
@@ -13,6 +14,13 @@ const Login = () => {
     const [requires2FA, setRequires2FA] = useState(false);
     const [twoFactorToken, setTwoFactorToken] = useState('');
     const [tempUserId, setTempUserId] = useState(null);
+
+    React.useEffect(() => {
+        const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+        if (token) {
+            navigate('/profile');
+        }
+    }, [navigate]);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -32,9 +40,16 @@ const Login = () => {
                     setRequires2FA(true);
                     setTempUserId(data.tempId);
                 } else {
-                    localStorage.setItem('adminToken', data.token);
+                    const isClient = data.user.role === 'client' || !['admin', 'gerente', 'vendedor', 'técnico', 'rh', 'marketing', 'finanzas'].includes(data.user.role);
+                    
+                    if (isClient) {
+                        localStorage.setItem('userToken', data.token);
+                    } else {
+                        localStorage.setItem('adminToken', data.token);
+                    }
+                    
                     localStorage.setItem('user', JSON.stringify(data.user));
-                    navigate(data.user.role === 'admin' ? '/admin' : '/');
+                    navigate(isClient ? '/profile' : '/admin');
                 }
             } else {
                 setError(data.error || 'Credenciales inválidas');
@@ -60,9 +75,16 @@ const Login = () => {
             const data = await response.json();
 
             if (response.ok) {
-                localStorage.setItem('adminToken', data.token);
+                const isClient = data.user.role === 'client' || !['admin', 'gerente', 'vendedor', 'técnico', 'rh', 'marketing', 'finanzas'].includes(data.user.role);
+                
+                if (isClient) {
+                    localStorage.setItem('userToken', data.token);
+                } else {
+                    localStorage.setItem('adminToken', data.token);
+                }
+                
                 localStorage.setItem('user', JSON.stringify(data.user));
-                navigate('/admin');
+                navigate(isClient ? '/profile' : '/admin');
             } else {
                 setError(data.error || 'Código incorrecto');
             }
@@ -142,6 +164,11 @@ const Login = () => {
 
                     {!requires2FA ? (
                         <>
+                            <Link to="/" className="inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-black transition-colors group mb-4">
+                                <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
+                                Volver a la tienda
+                            </Link>
+
                             <div className="space-y-2">
                                 <h1 className="text-3xl font-bold text-gray-900">Bienvenido</h1>
                                 <p className="text-gray-500">Ingresa tus credenciales para continuar</p>
@@ -208,12 +235,47 @@ const Login = () => {
                                 </Button>
                             </form>
 
-                            <p className="text-center text-sm text-gray-500">
-                                ¿No tienes cuenta?{' '}
-                                <Link to="/register" className="font-semibold text-black hover:underline">
-                                    Regístrate aquí
-                                </Link>
-                            </p>
+                                <div className="relative my-8">
+                                    <div className="absolute inset-0 flex items-center">
+                                        <span className="w-full border-t border-gray-200"></span>
+                                    </div>
+                                    <div className="relative flex justify-center text-xs uppercase font-bold">
+                                        <span className="bg-white px-4 text-gray-400">O continuar con</span>
+                                    </div>
+                                </div>
+
+                                <GoogleLoginButton 
+                                    onSuccess={async (credential) => {
+                                        setLoading(true);
+                                        try {
+                                            const res = await fetch('/api/auth/google-login', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ credential })
+                                            });
+                                            const data = await res.json();
+                                            if (res.ok) {
+                                                localStorage.setItem('adminToken', data.token);
+                                                localStorage.setItem('user', JSON.stringify(data.user));
+                                                navigate('/');
+                                            } else {
+                                                setError(data.error);
+                                            }
+                                        } catch (err) {
+                                            setError('Error de conexión con Google');
+                                        } finally {
+                                            setLoading(false);
+                                        }
+                                    }}
+                                    onError={(err) => setError(err)}
+                                />
+
+                                <p className="text-center text-sm text-gray-500 mt-6">
+                                    ¿No tienes cuenta?{' '}
+                                    <Link to="/register" className="font-semibold text-black hover:underline">
+                                        Regístrate aquí
+                                    </Link>
+                                </p>
                         </>
                     ) : (
                         <div className="text-center space-y-8">

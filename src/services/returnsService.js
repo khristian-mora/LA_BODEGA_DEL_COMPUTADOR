@@ -124,7 +124,7 @@ export const returnsService = {
     // Export returns to CSV
     exportReturns: async (params = {}) => {
         const queryParams = new URLSearchParams();
-        queryParams.append('format', 'csv');
+        queryParams.append('format', params.format || 'json');
         if (params.status) queryParams.append('status', params.status);
         if (params.startDate) queryParams.append('startDate', params.startDate);
         if (params.endDate) queryParams.append('endDate', params.endDate);
@@ -133,7 +133,7 @@ export const returnsService = {
             headers: getHeaders()
         });
         if (!response.ok) throw new Error('Error al exportar');
-        return response.text();
+        return params.format === 'csv' ? response.text() : response.json();
     },
 
     // Get return reasons (for form)

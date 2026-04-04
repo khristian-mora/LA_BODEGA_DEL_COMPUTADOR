@@ -22,14 +22,87 @@ export const ShopProvider = ({ children }) => {
     useEffect(() => {
         loadProducts();
 
+        // Load sync cart if logged in
+        const token = localStorage.getItem('adminToken') || localStorage.getItem('userToken');
+        if (token) {
+            fetchRemoteCart(token);
+        }
+
         // Listen for admin changes
         window.addEventListener('inventory-updated', loadProducts);
         return () => window.removeEventListener('inventory-updated', loadProducts);
     }, []);
 
+    const fetchRemoteCart = async (token) => {
+        try {
+            const res = await fetch('/api/user/cart', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const remoteCart = await res.json();
+                if (remoteCart && remoteCart.length > 0) {
+                    setCart(prevCart => {
+                        // Merge Strategy: Combine unique products, sum quantities for duplicates
+                        const merged = [...prevCart];
+                        remoteCart.forEach(remoteItem => {
+                            const index = merged.findIndex(i => i.id === remoteItem.productId);
+                            if (index !== -1) {
+                                // If exists in both, we take the remote one or sum? User said "merge"
+                                // Let's sum if quantities are different or just keep remote. 
+                                // Summing is usually better for "fusionar"
+                                merged[index].quantity = Math.max(merged[index].quantity, remoteItem.quantity);
+                            } else {
+                                merged.push({
+                                    id: remoteItem.productId,
+                                    name: remoteItem.name,
+                                    price: remoteItem.price,
+                                    image: remoteItem.image,
+                                    category: remoteItem.category,
+                                    quantity: remoteItem.quantity
+                                });
+                            }
+                        });
+                        return merged;
+                    });
+                }
+            }
+        } catch (err) {
+            console.error('Error fetching remote cart:', err);
+        }
+    };
+
+    // Auto-sync to backend when cart changes
     useEffect(() => {
         localStorage.setItem('cart', JSON.stringify(cart));
+        
+        const token = localStorage.getItem('adminToken') || localStorage.getItem('userToken');
+        if (token) {
+            const timeoutId = setTimeout(() => {
+                syncCartWithServer(cart, token);
+            }, 1000); // 1s Debounce
+            return () => clearTimeout(timeoutId);
+        }
     }, [cart]);
+
+    const syncCartWithServer = async (currentCart, token) => {
+        try {
+            await fetch('/api/user/cart/sync', {
+                method: 'POST',
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ 
+                    cart: currentCart.map(item => ({ 
+                        productId: item.id, 
+                        quantity: item.quantity 
+                    })) 
+                })
+            });
+        } catch (err) {
+            console.error('Error syncing cart:', err);
+        }
+    };
 
     const formatPrice = (price) => {
         return new Intl.NumberFormat('es-CO', {
@@ -38,6 +111,7 @@ export const ShopProvider = ({ children }) => {
             minimumFractionDigits: 0
         }).format(price);
     };
+
 
     const addToCart = (product, quantity = 1) => {
         setCart(prevCart => {
@@ -81,7 +155,7 @@ export const ShopProvider = ({ children }) => {
         return cart.reduce((count, item) => count + item.quantity, 0);
     };
 
-    const value = {
+    const value = React.useMemo(() => ({
         products,
         cart,
         user,
@@ -92,7 +166,7 @@ export const ShopProvider = ({ children }) => {
         clearCart,
         getCartTotal,
         getCartCount
-    };
+    }), [products, cart, user]);
 
     return (
         <ShopContext.Provider value={value}>

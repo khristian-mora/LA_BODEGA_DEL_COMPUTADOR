@@ -721,6 +721,11 @@ export const exportWarranties = (req, res) => {
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
+        const { format = 'csv' } = req.query;
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
         // Convert to CSV
         const headers = ['ID', 'Cliente', 'Email', 'Teléfono', 'Dispositivo', 'Marca', 'Modelo', 'Serial', 'Fecha Inicio', 'Fecha Fin', 'Estado', 'Tipo', 'Términos'];
         const csvRows = rows.map(row => [

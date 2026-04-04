@@ -237,6 +237,34 @@ export const createOrder = async (req, res) => {
                         if (itemsProcessedCount === processedItems.length && !hasError) {
                             db.run('COMMIT');
                             
+                            // Crear garantías automáticamente para cada producto
+                            const now = new Date().toISOString();
+                            const warrantyPromises = processedItems.map(async (item) => {
+                                const product = await new Promise((resolve, reject) => {
+                                    db.get('SELECT warrantyMonths FROM products WHERE id = ?', [item.id], (err, row) => {
+                                        if (err) reject(err);
+                                        else resolve(row);
+                                    });
+                                });
+                                const warrantyMonths = product?.warrantyMonths || 12;
+                                const endDate = new Date();
+                                endDate.setMonth(endDate.getMonth() + warrantyMonths);
+                                
+                                return new Promise((resolve, reject) => {
+                                    db.run(
+                                        `INSERT INTO warranties (orderId, productId, startDate, endDate, terms, status, createdAt) 
+                                         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                                        [orderId, item.id, now, endDate.toISOString(), `Garantía automática por compra - ${warrantyMonths} meses`, 'Active', now],
+                                        (err) => {
+                                            if (err) console.error('[Warranty] Error creating warranty:', err);
+                                            resolve();
+                                        }
+                                    );
+                                });
+                            });
+                            
+                            Promise.all(warrantyPromises).catch(err => console.error('[Warranty] Error creating warranties:', err));
+                            
                             // Trigger Webhook
                             triggerN8nWebhook('order.created', {
                                 orderId,
@@ -318,6 +346,24 @@ export const updateOrderStatus = (req, res) => {
         db.run('UPDATE orders SET status = ?, updatedAt = ? WHERE id = ?', [status, updatedAt, id], function (err) {
             if (err) {
                 return res.status(400).json({ error: err.message });
+            }
+            
+            // Update customer totalSpent when order is delivered
+            if (status === 'Entregado' && order.total) {
+                const customerName = order.customerName;
+                db.get('SELECT id, totalSpent, customerType FROM customers WHERE name = ?', [customerName], (err, customer) => {
+                    if (!err && customer) {
+                        const newTotal = (customer.totalSpent || 0) + parseFloat(order.total);
+                        const newType = (newTotal >= 5000000 && customer.customerType !== 'VIP') ? 'VIP' : customer.customerType;
+                        
+                        db.run('UPDATE customers SET totalSpent = ?, lastPurchaseDate = ?, customerType = ? WHERE id = ?', 
+                            [newTotal, updatedAt, newType, customer.id], (err) => {
+                                if (!err) {
+                                    console.log(`Updated customer ${customerName} totalSpent to ${newTotal}${newType !== customer.customerType ? `, upgraded to ${newType}` : ''}`);
+                                }
+                            });
+                    }
+                });
             }
             
             // Trigger Webhook
@@ -531,5 +577,74 @@ export const cancelOrder = (req, res) => {
                 );
             }
         });
+    });
+};
+
+// Export Orders (Complete Database)
+export const exportOrders = (req, res) => {
+    const { status, startDate, endDate, format = 'json' } = req.query;
+    
+    let sql = `
+        SELECT o.*, 
+               (SELECT JSON_GROUP_ARRAY(JSON_OBJECT(
+                   'id', oi.id,
+                   'productId', oi.productId,
+                   'quantity', oi.quantity,
+                   'price', oi.price,
+                   'name', p.name
+               ))
+                FROM order_items oi
+                JOIN products p ON oi.productId = p.id
+                WHERE oi.orderId = o.id) as items
+        FROM orders o
+        WHERE 1=1
+    `;
+    const params = [];
+
+    if (status) {
+        sql += ' AND o.status = ?';
+        params.push(status);
+    }
+    if (startDate) {
+        sql += ' AND o.createdAt >= ?';
+        params.push(startDate);
+    }
+    if (endDate) {
+        sql += ' AND o.createdAt <= ?';
+        params.push(endDate);
+    }
+
+    sql += ' ORDER BY o.createdAt DESC';
+
+    db.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (format === 'json') {
+            return res.json(rows.map(row => ({
+                ...row,
+                items: JSON.parse(row.items || '[]')
+            })));
+        }
+
+        // Convert to CSV
+        const headers = ['Orden #', 'Cliente', 'Email', 'Teléfono', 'Total', 'Subtotal', 'Impuestos', 'Descuento', 'Método Pago', 'Estado', 'Fecha'];
+        const csvRows = rows.map(row => [
+            row.orderNumber,
+            `"${(row.customerName || '').replace(/"/g, '""')}"`,
+            row.customerEmail,
+            row.customerPhone,
+            row.total,
+            row.subtotal,
+            row.tax,
+            row.discount,
+            row.paymentMethod,
+            row.status,
+            row.createdAt
+        ].join(','));
+        
+        const csvContent = [headers.join(','), ...csvRows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=pedidos_export.csv');
+        res.send('\ufeff' + csvContent);
     });
 };

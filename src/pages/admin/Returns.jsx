@@ -12,12 +12,15 @@ import {
     RotateCcw, Plus, Edit2, Trash2, X, AlertCircle, CheckCircle, Clock,
     Download, Filter, Search, RefreshCw, DollarSign, Package, FileText,
     TrendingUp, TrendingDown, AlertTriangle, Eye, Send, Check, XCircle,
-    Calendar, User, Tag, ArrowRight, Info
+    Calendar, User, Tag, ArrowRight, Info, Activity, ChevronLeft, ChevronRight, ShieldCheck, Box
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Button from '../../components/Button';
 import { buildApiUrl } from '../../config/config';
 import { useModal } from '../../context/ModalContext';
+import PortalWrapper from '../../components/PortalWrapper';
 import { useShop } from '../../context/ShopContext';
+import * as XLSX from 'xlsx';
 
 const AdminReturns = () => {
     const { showConfirm, showAlert } = useModal();
@@ -51,27 +54,17 @@ const AdminReturns = () => {
 
     // Form states
     const [formData, setFormData] = useState({
-        orderId: '',
-        customerId: '',
-        reason: '',
-        reasonType: '',
-        items: '',
-        quantity: 1,
-        condition: 'unopened',
-        notes: ''
+        orderId: '', customerId: '', reason: '', reasonType: '', items: '', quantity: 1, condition: 'unopened', notes: ''
     });
 
     const [resolutionData, setResolutionData] = useState({
-        resolution: 'refund',
-        refundAmount: '',
-        exchangeProductId: '',
-        notes: ''
+        resolution: 'refund', refundAmount: '', exchangeProductId: '', notes: ''
     });
 
     // Fetch data
     useEffect(() => {
         fetchData();
-    }, [currentPage, filterStatus, filterReasonType, dateRange]);
+    }, [currentPage, filterStatus, filterReasonType, dateRange, searchTerm]);
 
     const fetchData = useCallback(async () => {
         setLoading(true);
@@ -79,7 +72,6 @@ const AdminReturns = () => {
             const token = localStorage.getItem('adminToken');
             const headers = { 'Authorization': `Bearer ${token}` };
 
-            // Build returns URL with all filters
             const params = new URLSearchParams();
             params.append('page', currentPage);
             params.append('limit', itemsPerPage);
@@ -87,6 +79,7 @@ const AdminReturns = () => {
             if (filterReasonType) params.append('reasonType', filterReasonType);
             if (dateRange.start) params.append('startDate', dateRange.start);
             if (dateRange.end) params.append('endDate', dateRange.end);
+            if (searchTerm) params.append('search', searchTerm);
 
             const [returnsRes, ordersRes, customersRes] = await Promise.all([
                 fetch(buildApiUrl(`/api/returns?${params.toString()}`), { headers }),
@@ -94,64 +87,54 @@ const AdminReturns = () => {
                 fetch(buildApiUrl('/api/customers'), { headers })
             ]);
 
-            if (!returnsRes.ok) throw new Error('Error al cargar devoluciones');
-
-            const returnsData = await returnsRes.json();
-            if (returnsData.returns) {
-                setReturns(returnsData.returns);
+            if (returnsRes.ok) {
+                const returnsData = await returnsRes.json();
+                setReturns(returnsData.returns || returnsData.data || []);
                 setTotalPages(returnsData.totalPages || 1);
-                setTotalReturns(returnsData.total || returnsData.returns.length);
-            } else {
-                setReturns(returnsData);
-                setTotalPages(1);
-                setTotalReturns(returnsData.length);
+                setTotalReturns(returnsData.total || 0);
             }
 
-            if (ordersRes.ok) setOrders(await ordersRes.json());
-            if (customersRes.ok) setCustomers(await customersRes.json());
+            if (ordersRes.ok) {
+                const ordersData = await ordersRes.json();
+                setOrders(ordersData.orders || ordersData.data || []);
+            }
+            if (customersRes.ok) {
+                const customersData = await customersRes.json();
+                setCustomers(customersData.customers || customersData.data || []);
+            }
         } catch (error) {
             console.error(error);
-            showAlert({ title: 'Error', message: 'Error al cargar datos', type: 'error' });
         } finally {
             setLoading(false);
         }
-    }, [currentPage, filterStatus, filterReasonType, dateRange, itemsPerPage, showAlert]);
+    }, [currentPage, filterStatus, filterReasonType, dateRange, itemsPerPage, searchTerm]);
 
-    // Handle create/update submit
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
-
         try {
-            const data = {
-                ...formData,
-                quantity: Number(formData.quantity) || 1
-            };
-
+            const data = { ...formData, quantity: Number(formData.quantity) || 1 };
             if (editingReturn) {
                 await returnsService.updateReturn(editingReturn.id, data);
-                showAlert({ title: 'Éxito', message: 'Devolución actualizada', type: 'success' });
+                showAlert({ title: 'RMA Actualizada', message: 'Registro de devolución modificado', type: 'success' });
             } else {
                 await returnsService.createReturn(data);
-                showAlert({ title: 'Éxito', message: 'Devolución creada', type: 'success' });
+                showAlert({ title: 'RMA Iniciada', message: 'Nueva solicitud de devolución registrada', type: 'success' });
             }
-
             setShowForm(false);
             setEditingReturn(null);
             resetForm();
             fetchData();
         } catch (error) {
-            showAlert({ title: 'Error', message: error.message, type: 'error' });
+            showAlert({ title: 'Error RMA', message: error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
     };
 
-    // Handle resolution
     const handleResolution = async (e) => {
         e.preventDefault();
         if (!selectedReturn) return;
-
         setLoading(true);
         try {
             await returnsService.processResolution(
@@ -160,943 +143,753 @@ const AdminReturns = () => {
                 resolutionData.refundAmount ? Number(resolutionData.refundAmount) : null,
                 resolutionData.notes
             );
-
-            showAlert({ title: 'Éxito', message: 'Resolución procesada exitosamente', type: 'success' });
+            showAlert({ title: 'Caso Cerrado', message: 'Resolución procesada y registrada exitosamente', type: 'success' });
             setShowResolutionForm(false);
             setSelectedReturn(null);
             setResolutionData({ resolution: 'refund', refundAmount: '', exchangeProductId: '', notes: '' });
             fetchData();
         } catch (error) {
-            showAlert({ title: 'Error', message: error.message, type: 'error' });
+            showAlert({ title: 'Error de Resolución', message: error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
     };
 
-    // Handle status change with confirmation
-    const handleStatusChange = async (id, newStatus) => {
-        showConfirm(`¿Cambiar estado a "${RETURN_STATUS_CONFIG[newStatus]?.label || newStatus}"?`, async () => {
-            try {
-                await returnsService.updateStatus(id, newStatus);
-                showAlert({ title: 'Éxito', message: 'Estado actualizado', type: 'success' });
-                fetchData();
-            } catch (error) {
-                showAlert({ title: 'Error', message: error.message || 'Error al actualizar estado', type: 'error' });
-            }
+    const handleStatusUpdate = async (id, newStatus, message) => {
+        const confirmed = await showConfirm({
+            title: 'Actualizar RMA',
+            message: `¿Confirmar transición de estado a: ${RETURN_STATUS_CONFIG[newStatus]?.label}?`,
+            variant: 'info'
         });
+        if (!confirmed) return;
+        try {
+            await returnsService.updateStatus(id, newStatus);
+            showAlert({ title: 'Estado Sincronizado', message: message || 'Flujo de RMA actualizado', type: 'success' });
+            fetchData();
+        } catch (error) {
+            showAlert({ title: 'Fallo de Transición', message: error.message, type: 'error' });
+        }
     };
 
-    // Handle approve
-    const handleApprove = async (id) => {
-        showConfirm('¿Aprobar esta devolución?', async () => {
-            try {
-                await returnsService.approveReturn(id);
-                showAlert({ title: 'Éxito', message: 'Devolución aprobada', type: 'success' });
-                fetchData();
-            } catch (error) {
-                showAlert({ title: 'Error', message: error.message, type: 'error' });
-            }
-        });
-    };
-
-    // Handle reject
-    const handleReject = async (id) => {
-        showConfirm('¿Rechazar esta devolución?', async () => {
-            try {
-                await returnsService.rejectReturn(id);
-                showAlert({ title: 'Éxito', message: 'Devolución rechazada', type: 'success' });
-                fetchData();
-            } catch (error) {
-                showAlert({ title: 'Error', message: error.message, type: 'error' });
-            }
-        });
-    };
-
-    // Handle mark as received
-    const handleMarkReceived = async (id) => {
-        showConfirm('¿Marcar devolución como recibida?', async () => {
-            try {
-                await returnsService.markAsReceived(id);
-                showAlert({ title: 'Éxito', message: 'Devolución marcada como recibida', type: 'success' });
-                fetchData();
-            } catch (error) {
-                showAlert({ title: 'Error', message: error.message, type: 'error' });
-            }
-        });
-    };
-
-    // Handle delete
     const handleDelete = async (returnId) => {
         const confirmed = await showConfirm({
-            title: 'Confirmar eliminación',
-            message: '¿Eliminar esta devolución?',
+            title: 'Eliminar Registro RMA',
+            message: 'Esta acción purgará el registro de devolución permanentemente.',
             variant: 'danger'
         });
         if (!confirmed) return;
-
         try {
             await returnsService.deleteReturn(returnId);
-            showAlert({ title: 'Eliminada', message: 'Devolución eliminada', type: 'success' });
+            showAlert({ title: 'Registro Purgado', message: 'Devolución eliminada del historial', type: 'success' });
             fetchData();
         } catch (error) {
-            showAlert({ title: 'Error', message: error.message || 'Error al eliminar', type: 'error' });
+            showAlert({ title: 'Error de Purga', message: error.message, type: 'error' });
         }
     };
 
-    // Handle export
-    const handleExport = async () => {
+    const handleExportExcel = async () => {
         try {
-            const params = {};
-            if (filterStatus) params.status = filterStatus;
-            if (dateRange.start) params.startDate = dateRange.start;
-            if (dateRange.end) params.endDate = dateRange.end;
+            const allReturns = await returnsService.exportReturns({
+                status: filterStatus || null,
+                startDate: dateRange.start || null,
+                endDate: dateRange.end || null,
+                format: 'json'
+            });
 
-            const csvContent = await returnsService.exportReturns(params);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `devoluciones_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
-            showAlert({ title: 'Éxito', message: 'Exportación completada', type: 'success' });
+            if (!allReturns || allReturns.length === 0) {
+                showAlert({ title: 'Sin Datos', message: 'No hay devoluciones para exportar con los filtros actuales', type: 'info' });
+                return;
+            }
+
+            const exportData = allReturns.map(rma => ({
+                'ID RMA': rma.id,
+                'Código RMA': rma.rmaCode || 'N/A',
+                'Orden #': rma.orderId,
+                'Cliente': rma.customerNameFull || rma.customerName,
+                'Email': rma.customerEmail || '',
+                'Producto': rma.product || rma.items,
+                'Cantidad': rma.quantity || 1,
+                'Motivo': rma.reason,
+                'Categoría': rma.reasonCategory || rma.reasonType,
+                'Estado': RETURN_STATUS_CONFIG[rma.status]?.label || rma.status,
+                'Monto Reembolso': rma.refundAmount || 0,
+                'Fecha Creación': new Date(rma.createdAt).toLocaleString(),
+                'Fecha Resolución': rma.resolvedAt ? new Date(rma.resolvedAt).toLocaleString() : 'Pendiente',
+                'Notas': rma.notes || ''
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Devoluciones');
+
+            const wscols = [
+                { wch: 10 }, { wch: 20 }, { wch: 10 }, { wch: 30 }, 
+                { wch: 30 }, { wch: 30 }, { wch: 10 }, { wch: 40 }, 
+                { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, 
+                { wch: 20 }, { wch: 40 }
+            ];
+            worksheet['!cols'] = wscols;
+
+            XLSX.writeFile(workbook, `Reporte_Devoluciones_${new Date().toISOString().split('T')[0]}.xlsx`);
         } catch (error) {
-            showAlert({ title: 'Error', message: 'Error al exportar', type: 'error' });
+            console.error('Error exporting to Excel:', error);
+            showAlert({ title: 'Error Exportación', message: 'No se pudo generar el archivo Excel', type: 'error' });
         }
     };
 
-    // Reset form
     const resetForm = () => {
-        setFormData({
-            orderId: '',
-            customerId: '',
-            reason: '',
-            reasonType: '',
-            items: '',
-            quantity: 1,
-            condition: 'unopened',
-            notes: ''
-        });
+        setFormData({ orderId: '', customerId: '', reason: '', reasonType: '', items: '', quantity: 1, condition: 'unopened', notes: '' });
     };
 
-    // View return details
-    const viewDetails = (returnItem) => {
-        setDetailReturn(returnItem);
-        setShowDetailModal(true);
+    const getStatusStyle = (status) => {
+        switch (status) {
+            case 'pending': return 'bg-amber-500/10 text-amber-600 border-amber-200';
+            case 'approved': return 'bg-blue-500/10 text-blue-600 border-blue-200';
+            case 'received': return 'bg-indigo-500/10 text-indigo-600 border-indigo-200';
+            case 'refunded':
+            case 'exchanged': return 'bg-emerald-500/10 text-emerald-600 border-emerald-200';
+            case 'rejected': return 'bg-red-500/10 text-red-600 border-red-200';
+            default: return 'bg-slate-500/10 text-slate-600 border-slate-200';
+        }
     };
 
-    // Status badge component
-    const getStatusBadge = (status) => {
-        const config = RETURN_STATUS_CONFIG[status] || { label: status, color: 'bg-gray-100 text-gray-700' };
-        return (
-            <span className={`px-2 py-1 rounded text-xs font-bold ${config.color} flex items-center gap-1 w-fit`}>
-                {config.label}
-            </span>
-        );
-    };
-
-    // Calculate statistics
     const stats = useMemo(() => {
         const pending = returns.filter(r => r.status === 'pending').length;
-        const approved = returns.filter(r => r.status === 'approved').length;
-        const received = returns.filter(r => r.status === 'received').length;
-        const completed = returns.filter(r => r.status === 'refunded' || r.status === 'exchanged').length;
-        const rejected = returns.filter(r => r.status === 'rejected').length;
-        const totalRefunded = returns.filter(r => r.refundAmount).reduce((sum, r) => sum + (r.refundAmount || 0), 0);
-        const awaitingAction = pending + approved;
-        return { pending, approved, received, completed, rejected, totalRefunded, awaitingAction };
+        const processed = returns.filter(r => ['refunded', 'exchanged', 'rejected'].includes(r.status)).length;
+        const totalRefunded = returns.reduce((sum, r) => sum + (r.refundAmount || 0), 0);
+        return { pending, processed, totalRefunded };
     }, [returns]);
 
-    // Filtered returns by search
-    const filteredReturns = useMemo(() => {
-        if (!searchTerm) return returns;
-        const term = searchTerm.toLowerCase();
-        return returns.filter(r =>
-            r.customerName?.toLowerCase().includes(term) ||
-            r.reason?.toLowerCase().includes(term) ||
-            String(r.id).includes(term) ||
-            String(r.orderId).includes(term) ||
-            r.items?.toLowerCase().includes(term)
-        );
-    }, [returns, searchTerm]);
-
     return (
-        <AdminLayout title="Gestión de Devoluciones (RMA)">
-            <div className="space-y-6 animate-fade-in-up">
+        <AdminLayout title="Centro de Retornos (RMA)">
+            <div className="space-y-6 pb-12">
+                
+                {/* Industrial KPI Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-amber-50 rounded-2xl text-amber-600 transition-transform group-hover:scale-110">
+                                <Clock className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-amber-500 bg-amber-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Acción Requerida</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{stats.pending}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">RMAs Pendientes</p>
+                        </div>
+                    </motion.div>
 
-                {/* Header */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                    <div>
-                        <h2 className="font-bold text-2xl text-gray-800 flex items-center gap-2">
-                            <RotateCcw className="w-7 h-7 text-blue-600" />
-                            Sistema de Devoluciones (RMA)
-                        </h2>
-                        <p className="text-gray-500 mt-1">Gestión completa de devoluciones, reembolsos y canjes</p>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button onClick={handleExport} variant="outline" className="flex items-center gap-2">
-                            <Download className="w-4 h-4" /> Exportar CSV
-                        </Button>
-                        <Button onClick={() => { setEditingReturn(null); resetForm(); setShowForm(true); }} className="flex items-center gap-2">
-                            <Plus className="w-4 h-4" /> Nueva Devolución
-                        </Button>
-                    </div>
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.1 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 transition-transform group-hover:scale-110">
+                                <CheckCircle className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-emerald-500 bg-emerald-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Tasa de Cierre</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{stats.processed}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Casos Resueltos</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.2 }}
+                        className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden group"
+                    >
+                        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-150 transition-transform">
+                            <RotateCcw className="w-24 h-24 text-white" />
+                        </div>
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                            <div className="p-3 bg-white/10 rounded-2xl text-white">
+                                <DollarSign className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-white/50 bg-white/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Impacto Financiero</span>
+                        </div>
+                        <div className="space-y-1 relative z-10">
+                            <h4 className="text-3xl font-black text-white tracking-tighter">{formatPrice(stats.totalRefunded)}</h4>
+                            <p className="text-[11px] font-bold text-white/40 uppercase tracking-widest">Liquidez Retornada</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 transition-transform group-hover:scale-110">
+                                <Activity className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Carga de Red</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{totalReturns}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Solicitudes Totales</p>
+                        </div>
+                    </motion.div>
                 </div>
 
-                {/* KPI Statistics Cards */}
-                <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-                    <div className="bg-gradient-to-br from-yellow-50 to-yellow-100 p-4 rounded-xl border border-yellow-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Clock className="w-5 h-5 text-yellow-600" />
-                            <p className="text-xs font-medium text-yellow-700">Pendientes</p>
-                        </div>
-                        <p className="text-3xl font-bold text-yellow-800">{stats.pending}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-blue-50 to-blue-100 p-4 rounded-xl border border-blue-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <CheckCircle className="w-5 h-5 text-blue-600" />
-                            <p className="text-xs font-medium text-blue-700">Aprobadas</p>
-                        </div>
-                        <p className="text-3xl font-bold text-blue-800">{stats.approved}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-purple-50 to-purple-100 p-4 rounded-xl border border-purple-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Package className="w-5 h-5 text-purple-600" />
-                            <p className="text-xs font-medium text-purple-700">Recibidas</p>
-                        </div>
-                        <p className="text-3xl font-bold text-purple-800">{stats.received}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-green-50 to-green-100 p-4 rounded-xl border border-green-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <Check className="w-5 h-5 text-green-600" />
-                            <p className="text-xs font-medium text-green-700">Completadas</p>
-                        </div>
-                        <p className="text-3xl font-bold text-green-800">{stats.completed}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-red-50 to-red-100 p-4 rounded-xl border border-red-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <XCircle className="w-5 h-5 text-red-600" />
-                            <p className="text-xs font-medium text-red-700">Rechazadas</p>
-                        </div>
-                        <p className="text-3xl font-bold text-red-800">{stats.rejected}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-orange-50 to-orange-100 p-4 rounded-xl border border-orange-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <AlertTriangle className="w-5 h-5 text-orange-600" />
-                            <p className="text-xs font-medium text-orange-700">Por Revisar</p>
-                        </div>
-                        <p className="text-3xl font-bold text-orange-800">{stats.awaitingAction}</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 p-4 rounded-xl border border-emerald-200 shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                            <DollarSign className="w-5 h-5 text-emerald-600" />
-                            <p className="text-xs font-medium text-emerald-700">Total Reembolsado</p>
-                        </div>
-                        <p className="text-lg font-bold text-emerald-800">{formatPrice(stats.totalRefunded)}</p>
-                    </div>
-                </div>
-
-                {/* Filters Section */}
-                <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <div className="flex flex-wrap gap-4 items-center">
-                        <div className="flex items-center gap-2 text-gray-500">
-                            <Filter className="w-4 h-4" />
-                            <span className="text-sm font-medium">Filtros:</span>
+                <div className="bg-white/70 backdrop-blur-2xl rounded-[3rem] shadow-2xl border border-white/50 overflow-hidden">
+                    {/* Industrial Toolbar */}
+                    <div className="p-10 border-b border-gray-100/50 flex flex-col lg:flex-row justify-between items-center bg-gray-50/10 gap-8">
+                        <div className="flex items-center gap-6">
+                            <div className="w-16 h-16 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl shadow-slate-200 group transition-all hover:scale-105">
+                                <RotateCcw className="w-8 h-8 text-white group-hover:rotate-[120deg] transition-transform duration-700" />
+                            </div>
+                            <div>
+                                <h3 className="font-black text-3xl text-slate-900 tracking-tight leading-none mb-2">Monitor RMA & Logística Inversa</h3>
+                                <div className="flex items-center gap-3">
+                                    <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.5)]"></span>
+                                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">Flujo Operativo de Garantías y Retornos</p>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* Search */}
-                        <div className="relative flex-1 min-w-[200px] max-w-sm">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                            <input
-                                type="text"
-                                placeholder="Buscar cliente, pedido, motivo, items..."
-                                value={searchTerm}
-                                onChange={e => setSearchTerm(e.target.value)}
-                                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            />
-                        </div>
-
-                        {/* Status Filter */}
-                        <select
-                            value={filterStatus}
-                            onChange={e => { setFilterStatus(e.target.value); setCurrentPage(1); }}
-                            className="p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">Todos los estados</option>
-                            {Object.entries(RETURN_STATUS_CONFIG).map(([value, config]) => (
-                                <option key={value} value={value}>{config.label}</option>
-                            ))}
-                        </select>
-
-                        {/* Reason Type Filter */}
-                        <select
-                            value={filterReasonType}
-                            onChange={e => { setFilterReasonType(e.target.value); setCurrentPage(1); }}
-                            className="p-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
-                        >
-                            <option value="">Todos los motivos</option>
-                            {RETURN_REASON_TYPES.map(r => (
-                                <option key={r.value} value={r.value}>{r.label}</option>
-                            ))}
-                        </select>
-
-                        {/* Date Range */}
-                        <div className="flex items-center gap-2">
-                            <Calendar className="w-4 h-4 text-gray-400" />
-                            <input
-                                type="date"
-                                value={dateRange.start}
-                                onChange={e => setDateRange({ ...dateRange, start: e.target.value })}
-                                className="p-2 border border-gray-200 rounded-lg text-sm"
-                            />
-                            <span className="text-gray-400">-</span>
-                            <input
-                                type="date"
-                                value={dateRange.end}
-                                onChange={e => setDateRange({ ...dateRange, end: e.target.value })}
-                                className="p-2 border border-gray-200 rounded-lg text-sm"
-                            />
-                        </div>
-
-                        {/* Clear Filters */}
-                        {(filterStatus || filterReasonType || searchTerm || dateRange.start || dateRange.end) && (
-                            <button
-                                onClick={() => {
-                                    setFilterStatus('');
-                                    setFilterReasonType('');
-                                    setSearchTerm('');
-                                    setDateRange({ start: '', end: '' });
-                                    setCurrentPage(1);
-                                }}
-                                className="text-sm text-blue-600 hover:underline flex items-center gap-1"
+                        <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
+                            <div className="relative flex-1 lg:w-80">
+                                <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="ID, Cliente o Motivo de RMA..."
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-12 pr-5 py-4 bg-white border border-slate-100 rounded-[1.5rem] text-sm font-medium transition-all focus:ring-[6px] focus:ring-slate-50 focus:border-slate-300 outline-none placeholder:text-slate-400"
+                                />
+                            </div>
+                            
+                            <select 
+                                value={filterStatus}
+                                onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
+                                className="px-6 py-4 bg-white border border-slate-100 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all outline-none appearance-none focus:ring-[6px] focus:ring-slate-50 min-w-[220px] cursor-pointer"
                             >
-                                <X className="w-3 h-3" /> Limpiar filtros
-                            </button>
-                        )}
+                                <option value="">TODOS LOS ESTADOS</option>
+                                {Object.entries(RETURN_STATUS_CONFIG).map(([val, cfg]) => <option key={val} value={val}>{cfg.label.toUpperCase()}</option>)}
+                            </select>
 
-                        <span className="ml-auto text-sm text-gray-500 font-medium">
-                            {totalReturns} devolución(es)
-                        </span>
+                            <motion.button 
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={handleExportExcel}
+                                className="h-14 flex-1 lg:flex-none bg-emerald-500 text-white rounded-[1.5rem] shadow-2xl shadow-emerald-100 hover:bg-emerald-600 font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 px-8 transition-colors"
+                            >
+                                <Download className="w-5 h-5" /> Exportar Excel
+                            </motion.button>
+
+                            <motion.button 
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={() => { setEditingReturn(null); resetForm(); setShowForm(true); }}
+                                className="h-14 flex-1 lg:flex-none bg-slate-900 text-white rounded-[1.5rem] shadow-2xl shadow-slate-200 hover:bg-black font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 px-8 transition-colors"
+                            >
+                                <Plus className="w-5 h-5" /> Nueva RMA
+                            </motion.button>
+                        </div>
                     </div>
-                </div>
 
-                {/* Returns Table */}
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                        <h3 className="font-bold text-gray-800 flex items-center gap-2">
-                            <FileText className="w-5 h-5" />
-                            Devoluciones Registradas
-                        </h3>
-                    </div>
-
+                    {/* Industrial Ledger Table */}
                     <div className="overflow-x-auto">
-                        {loading ? (
-                            <div className="text-center py-12">
-                                <RefreshCw className="w-8 h-8 text-gray-300 animate-spin mx-auto mb-2" />
-                                <p className="text-gray-500">Cargando devoluciones...</p>
-                            </div>
-                        ) : filteredReturns.length === 0 ? (
-                            <div className="text-center py-12">
-                                <Package className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-                                <p className="text-gray-500">No hay devoluciones registradas</p>
-                                <Button onClick={() => { setEditingReturn(null); resetForm(); setShowForm(true); }} className="mt-4">
-                                    <Plus className="w-4 h-4 mr-2" /> Crear Primera Devolución
-                                </Button>
-                            </div>
-                        ) : (
-                            <table className="w-full text-sm">
-                                <thead className="bg-gray-50 border-b border-gray-200">
-                                    <tr>
-                                        <th className="text-left p-4 font-bold text-gray-700">ID / Pedido</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Cliente</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Motivo</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Items</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Fecha</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Estado</th>
-                                        <th className="text-left p-4 font-bold text-gray-700">Reembolso</th>
-                                        <th className="text-right p-4 font-bold text-gray-700">Acciones</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredReturns.map((returnItem) => (
-                                        <tr key={returnItem.id} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                                            <td className="p-4">
-                                                <p className="font-bold text-gray-900">#{returnItem.id}</p>
-                                                <p className="text-xs text-gray-500">Pedido: #{returnItem.orderId}</p>
-                                            </td>
-                                            <td className="p-4">
-                                                <div className="flex items-center gap-2">
-                                                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                                                        <User className="w-4 h-4 text-blue-600" />
-                                                    </div>
-                                                    <div>
-                                                        <p className="font-bold text-gray-900">{returnItem.customerName}</p>
-                                                        {returnItem.customerEmail && (
-                                                            <p className="text-xs text-gray-500">{returnItem.customerEmail}</p>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </td>
-                                            <td className="p-4 max-w-xs">
-                                                <p className="truncate text-gray-600 font-medium" title={returnItem.reason}>
-                                                    {returnItem.reason}
-                                                </p>
-                                                {returnItem.reasonType && (
-                                                    <span className="text-xs text-gray-400 flex items-center gap-1 mt-1">
-                                                        <Tag className="w-3 h-3" />
-                                                        {RETURN_REASON_TYPES.find(r => r.value === returnItem.reasonType)?.label || returnItem.reasonType}
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="p-4">
-                                                <p className="text-gray-700">{returnItem.items || '-'}</p>
-                                                {returnItem.quantity && (
-                                                    <p className="text-xs text-gray-500">Cant: {returnItem.quantity}</p>
-                                                )}
-                                            </td>
-                                            <td className="p-4 text-gray-500">
-                                                {new Date(returnItem.createdAt || returnItem.date).toLocaleDateString('es-CO', {
-                                                    year: 'numeric',
-                                                    month: 'short',
-                                                    day: 'numeric'
-                                                })}
-                                            </td>
-                                            <td className="p-4">{getStatusBadge(returnItem.status)}</td>
-                                            <td className="p-4">
-                                                {returnItem.refundAmount ? (
-                                                    <span className="font-mono text-green-600 font-bold">
-                                                        {formatPrice(returnItem.refundAmount)}
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-gray-400">-</span>
-                                                )}
-                                            </td>
-                                            <td className="p-4 text-right">
-                                                <div className="flex gap-1 justify-end">
-                                                    {/* View Details */}
-                                                    <button
-                                                        onClick={() => viewDetails(returnItem)}
-                                                        className="text-gray-500 hover:text-gray-700 p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                                                        title="Ver Detalles"
-                                                    >
-                                                        <Eye className="w-4 h-4" />
-                                                    </button>
-
-                                                    {/* Quick Approve (for pending) */}
-                                                    {returnItem.status === 'pending' && (
-                                                        <button
-                                                            onClick={() => handleApprove(returnItem.id)}
-                                                            className="text-green-600 hover:text-green-800 p-1.5 hover:bg-green-50 rounded-lg transition-colors"
-                                                            title="Aprobar"
-                                                        >
-                                                            <Check className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-
-                                                    {/* Quick Reject (for pending) */}
-                                                    {returnItem.status === 'pending' && (
-                                                        <button
-                                                            onClick={() => handleReject(returnItem.id)}
-                                                            className="text-red-600 hover:text-red-800 p-1.5 hover:bg-red-50 rounded-lg transition-colors"
-                                                            title="Rechazar"
-                                                        >
-                                                            <XCircle className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-
-                                                    {/* Mark as Received (for approved) */}
-                                                    {returnItem.status === 'approved' && (
-                                                        <button
-                                                            onClick={() => handleMarkReceived(returnItem.id)}
-                                                            className="text-purple-600 hover:text-purple-800 p-1.5 hover:bg-purple-50 rounded-lg transition-colors"
-                                                            title="Marcar como Recibida"
-                                                        >
-                                                            <Package className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-
-                                                    {/* Process Resolution (for received) */}
-                                                    {returnItem.status === 'received' && (
-                                                        <button
-                                                            onClick={() => {
-                                                                setSelectedReturn(returnItem);
-                                                                setResolutionData({ ...resolutionData, refundAmount: returnItem.refundAmount || '' });
-                                                                setShowResolutionForm(true);
-                                                            }}
-                                                            className="text-blue-600 hover:text-blue-800 p-1.5 hover:bg-blue-50 rounded-lg transition-colors"
-                                                            title="Procesar Resolución"
-                                                        >
-                                                            <DollarSign className="w-4 h-4" />
-                                                        </button>
-                                                    )}
-
-                                                    {/* Status Dropdown */}
-                                                    {STATUS_TRANSITIONS[returnItem.status]?.length > 0 && (
-                                                        <div className="relative group">
-                                                            <button
-                                                                className="text-gray-500 hover:text-gray-700 p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
-                                                                title="Cambiar Estado"
-                                                            >
-                                                                <RefreshCw className="w-4 h-4" />
-                                                            </button>
-                                                            <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg p-2 hidden group-hover:block z-20 min-w-[150px]">
-                                                                <p className="text-xs text-gray-400 mb-2 px-2">Cambiar a:</p>
-                                                                {STATUS_TRANSITIONS[returnItem.status].map(status => (
-                                                                    <button
-                                                                        key={status}
-                                                                        onClick={() => handleStatusChange(returnItem.id, status)}
-                                                                        className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-100 rounded transition-colors"
-                                                                    >
-                                                                        {RETURN_STATUS_CONFIG[status]?.label || status}
-                                                                    </button>
-                                                                ))}
-                                                            </div>
-                                                        </div>
-                                                    )}
-
-                                                    {/* Edit */}
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingReturn(returnItem);
-                                                            setFormData({
-                                                                orderId: returnItem.orderId || '',
-                                                                customerId: returnItem.customerId || '',
-                                                                reason: returnItem.reason || '',
-                                                                reasonType: returnItem.reasonType || '',
-                                                                items: returnItem.items || '',
-                                                                quantity: returnItem.quantity || 1,
-                                                                condition: returnItem.condition || 'unopened',
-                                                                notes: returnItem.notes || ''
-                                                            });
-                                                            setShowForm(true);
-                                                        }}
-                                                        className="text-blue-600 hover:text-blue-800 p-1.5 hover:bg-blue-50 rounded-lg transition-colors"
-                                                        title="Editar"
-                                                    >
-                                                        <Edit2 className="w-4 h-4" />
-                                                    </button>
-
-                                                    {/* Delete */}
-                                                    <button
-                                                        onClick={() => handleDelete(returnItem.id)}
-                                                        className="text-red-600 hover:text-red-800 p-1.5 hover:bg-red-50 rounded-lg transition-colors"
-                                                        title="Eliminar"
-                                                    >
-                                                        <Trash2 className="w-4 h-4" />
-                                                    </button>
+                        <table className="w-full">
+                            <thead>
+                                <tr className="bg-slate-50/50 border-b border-gray-100/50">
+                                    <th className="px-10 py-6 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Identificador</th>
+                                    <th className="px-10 py-6 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Titular / Orden</th>
+                                    <th className="px-10 py-6 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Motivo / RMA</th>
+                                    <th className="px-10 py-6 text-left text-[11px] font-black text-slate-400 uppercase tracking-widest">Status</th>
+                                    <th className="px-10 py-6 text-right text-[11px] font-black text-slate-400 uppercase tracking-widest">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                                <AnimatePresence mode="popLayout">
+                                    {loading ? (
+                                        <tr>
+                                            <td colSpan="5" className="py-32 text-center">
+                                                <div className="flex flex-col items-center gap-6">
+                                                    <div className="w-12 h-12 border-[4px] border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Sincronizando Mallas de RMA...</p>
                                                 </div>
                                             </td>
                                         </tr>
+                                    ) : returns.length === 0 ? (
+                                        <tr>
+                                            <td colSpan="5" className="py-32 text-center opacity-20">
+                                                <RotateCcw className="w-20 h-20 mx-auto mb-6 text-slate-400" />
+                                                <p className="text-xs font-black uppercase tracking-[0.3em]">No se han detectado solicitudes de retorno en el perímetro</p>
+                                            </td>
+                                        </tr>
+                                    ) : returns.map((rma, idx) => (
+                                        <motion.tr 
+                                            key={rma.id}
+                                            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.05 }}
+                                            className="hover:bg-slate-50/50 transition-colors group"
+                                        >
+                                            <td className="px-10 py-8">
+                                                <div className="flex items-center gap-4">
+                                                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center text-white font-black text-xs shadow-lg group-hover:scale-110 transition-transform">
+                                                        #{rma.id}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <span className="block text-[11px] font-black text-slate-400 uppercase tracking-widest">Expedido</span>
+                                                        <span className="block text-sm font-bold text-slate-800 tracking-tight italic">{new Date(rma.createdAt).toLocaleDateString()}</span>
+                                                    </div>
+                                                </div>
+                                            </td>
+                                            <td className="px-10 py-8">
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-black text-slate-900 tracking-tight uppercase group-hover:text-indigo-600 transition-colors">{rma.customerName}</p>
+                                                    <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
+                                                        Orden <span className="underline italic">#{rma.orderId}</span>
+                                                    </p>
+                                                </div>
+                                            </td>
+                                            <td className="px-10 py-8 max-w-sm">
+                                                <div className="space-y-1">
+                                                    <p className="text-sm font-bold text-slate-700 leading-tight line-clamp-1 italic">"{rma.reason}"</p>
+                                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                                        <Tag className="w-3 h-3" /> {rma.reasonType}
+                                                    </p>
+                                                </div>
+                                            </td>
+                                            <td className="px-10 py-8">
+                                                <div className={`w-fit px-4 py-1.5 rounded-xl border-2 text-[9px] font-black uppercase tracking-[0.2em] shadow-sm ${getStatusStyle(rma.status)}`}>
+                                                    {RETURN_STATUS_CONFIG[rma.status]?.label}
+                                                </div>
+                                            </td>
+                                            <td className="px-10 py-8">
+                                                <div className="flex justify-end gap-3 translate-x-4 opacity-0 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-300">
+                                                    <motion.button 
+                                                        whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                        onClick={() => { setDetailReturn(rma); setShowDetailModal(true); }}
+                                                        className="w-10 h-10 bg-white border border-slate-100 rounded-xl flex items-center justify-center text-slate-400 hover:bg-slate-900 hover:text-white transition-all shadow-sm"
+                                                    >
+                                                        <Eye className="w-4 h-4" />
+                                                    </motion.button>
+                                                    
+                                                    {/* Workflows based on status */}
+                                                    {rma.status === 'pending' && (
+                                                        <>
+                                                            <motion.button 
+                                                                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                                onClick={() => handleStatusUpdate(rma.id, 'approved', 'Solicitud autorizada por administración')}
+                                                                className="w-10 h-10 bg-emerald-50 border border-emerald-100 rounded-xl flex items-center justify-center text-emerald-600 hover:bg-emerald-600 hover:text-white shadow-sm"
+                                                            >
+                                                                <Check className="w-4 h-4" />
+                                                            </motion.button>
+                                                            <motion.button 
+                                                                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                                onClick={() => handleStatusUpdate(rma.id, 'rejected', 'Solicitud denegada')}
+                                                                className="w-10 h-10 bg-red-50 border border-red-100 rounded-xl flex items-center justify-center text-red-600 hover:bg-red-600 hover:text-white shadow-sm"
+                                                            >
+                                                                <XCircle className="w-4 h-4" />
+                                                            </motion.button>
+                                                        </>
+                                                    )}
+
+                                                    {rma.status === 'approved' && (
+                                                        <motion.button 
+                                                            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                            onClick={() => handleStatusUpdate(rma.id, 'received', 'Equipo ingresado a laboratorio')}
+                                                            className="w-10 h-10 bg-indigo-50 border border-indigo-100 rounded-xl flex items-center justify-center text-indigo-600 hover:bg-indigo-600 hover:text-white shadow-sm"
+                                                        >
+                                                            <Package className="w-4 h-4" />
+                                                        </motion.button>
+                                                    )}
+
+                                                    {rma.status === 'received' && (
+                                                        <motion.button 
+                                                            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                            onClick={() => { setSelectedReturn(rma); setShowResolutionForm(true); }}
+                                                            className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white shadow-lg"
+                                                        >
+                                                            <DollarSign className="w-4 h-4" />
+                                                        </motion.button>
+                                                    )}
+
+                                                    <motion.button 
+                                                        whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                        onClick={() => handleDelete(rma.id)}
+                                                        className="w-10 h-10 bg-white border border-red-100 rounded-xl flex items-center justify-center text-red-400 hover:bg-red-500 hover:text-white shadow-sm"
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </motion.button>
+                                                </div>
+                                            </td>
+                                        </motion.tr>
                                     ))}
-                                </tbody>
-                            </table>
-                        )}
+                                </AnimatePresence>
+                            </tbody>
+                        </table>
                     </div>
 
-                    {/* Pagination */}
+                    {/* Industrial Pagination */}
                     {totalPages > 1 && (
-                        <div className="p-4 border-t border-gray-100 flex flex-col sm:flex-row justify-between items-center gap-4">
-                            <span className="text-sm text-gray-500">
-                                Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalReturns)} de {totalReturns} devoluciones
-                            </span>
-                            <div className="flex gap-2">
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        <div className="p-10 border-t border-slate-50 bg-slate-50/20 flex justify-between items-center">
+                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest italic">Páginas de RMA: {currentPage} / {totalPages}</p>
+                            <div className="flex gap-3">
+                                <motion.button 
+                                    whileHover={{ x: -2 }}
                                     disabled={currentPage === 1}
-                                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                                    onClick={() => setCurrentPage(p => p - 1)}
+                                    className="p-4 bg-white border border-slate-100 rounded-2xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
-                                    Anterior
-                                </button>
-                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                    const page = currentPage <= 3 ? i + 1 : currentPage + i - 2;
-                                    if (page > totalPages || page < 1) return null;
-                                    return (
-                                        <button
-                                            key={page}
-                                            onClick={() => setCurrentPage(page)}
-                                            className={`px-4 py-2 border rounded-lg text-sm transition-colors ${
-                                                currentPage === page
-                                                    ? 'bg-gray-900 text-white border-gray-900'
-                                                    : 'border-gray-200 hover:bg-gray-50'
-                                            }`}
-                                        >
-                                            {page}
-                                        </button>
-                                    );
-                                })}
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    <ChevronLeft className="w-5 h-5" />
+                                </motion.button>
+                                <motion.button 
+                                    whileHover={{ x: 2 }}
                                     disabled={currentPage === totalPages}
-                                    className="px-4 py-2 border border-gray-200 rounded-lg text-sm disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                                    onClick={() => setCurrentPage(p => p + 1)}
+                                    className="p-4 bg-white border border-slate-100 rounded-2xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
-                                    Siguiente
-                                </button>
+                                    <ChevronRight className="w-5 h-5" />
+                                </motion.button>
                             </div>
                         </div>
                     )}
                 </div>
-
             </div>
 
-            {/* Create/Edit Return Modal */}
-            {showForm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-in max-h-[90vh] flex flex-col">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50 flex-shrink-0">
-                            <h3 className="font-bold text-xl flex items-center gap-2">
-                                <RotateCcw className="w-5 h-5 text-blue-600" />
-                                {editingReturn ? 'Editar Devolución' : 'Nueva Devolución'}
-                            </h3>
-                            <button onClick={() => { setShowForm(false); setEditingReturn(null); resetForm(); }} className="text-gray-400 hover:text-black transition-colors">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <div className="overflow-y-auto flex-1">
-                            <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {/* Order Selection */}
+            {/* Industrial RMA Modal Form */}
+            <PortalWrapper isOpen={showForm}>
+                {showForm && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowForm(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+                            className="bg-white rounded-[3.5rem] w-full max-w-2xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+                        >
+                            <div className="p-10 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                                <div className="flex items-center gap-6">
+                                    <div className="w-16 h-16 bg-slate-900 rounded-[1.75rem] flex items-center justify-center shadow-2xl">
+                                        <RotateCcw className="w-8 h-8 text-white" />
+                                    </div>
                                     <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">
-                                            <Tag className="w-4 h-4 inline mr-1" /> Pedido *
-                                        </label>
-                                        <select
-                                            required
-                                            value={formData.orderId}
-                                            onChange={e => setFormData({ ...formData, orderId: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="">Seleccionar pedido</option>
-                                            {orders.map(o => (
-                                                <option key={o.id} value={o.id}>
-                                                    #{o.id} - {o.customerName} - {formatPrice(o.total)}
-                                                </option>
-                                            ))}
-                                        </select>
+                                        <h3 className="font-black text-3xl text-slate-900 tracking-tight mb-1">
+                                            {editingReturn ? 'Revisión RMA' : 'Iniciación RMA'}
+                                        </h3>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Configuración de Reversión Logística</p>
+                                    </div>
+                                </div>
+                                <button onClick={() => setShowForm(false)} className="w-12 h-12 flex items-center justify-center hover:bg-slate-100 rounded-2xl transition-all"><X className="w-6 h-6 text-slate-400" /></button>
+                            </div>
+
+                            <form onSubmit={handleSubmit} className="p-10 overflow-y-auto custom-scrollbar space-y-8">
+                                <div className="space-y-6">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Vínculo de Orden *</label>
+                                            <select 
+                                                required 
+                                                value={formData.orderId} 
+                                                onChange={e => setFormData({ ...formData, orderId: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none"
+                                            >
+                                                <option value="">SELECCIONAR ORDEN...</option>
+                                                {(orders || []).map(o => <option key={o.id} value={o.id}>#{o.id} - {o.customerName}</option>)}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Titular de Cuenta *</label>
+                                            <select 
+                                                required 
+                                                value={formData.customerId} 
+                                                onChange={e => setFormData({ ...formData, customerId: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none"
+                                            >
+                                                <option value="">RECONOCER CLIENTE...</option>
+                                                {(customers || []).map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
+                                            </select>
+                                        </div>
                                     </div>
 
-                                    {/* Customer Selection */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">
-                                            <User className="w-4 h-4 inline mr-1" /> Cliente *
-                                        </label>
-                                        <select
-                                            required
-                                            value={formData.customerId}
-                                            onChange={e => setFormData({ ...formData, customerId: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="">Seleccionar cliente</option>
-                                            {customers.map(c => (
-                                                <option key={c.id} value={c.id}>{c.name}</option>
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Tipo de Incidencia *</label>
+                                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                            {RETURN_REASON_TYPES.map(type => (
+                                                <button
+                                                    key={type.value}
+                                                    type="button"
+                                                    onClick={() => setFormData({ ...formData, reasonType: type.value })}
+                                                    className={`py-3 px-4 rounded-2xl text-[10px] font-black uppercase tracking-tighter border-2 transition-all ${
+                                                        formData.reasonType === type.value 
+                                                        ? 'bg-slate-900 text-white border-slate-900 shadow-lg' 
+                                                        : 'bg-white text-slate-400 border-slate-100 hover:border-slate-300'
+                                                    }`}
+                                                >
+                                                    {type.label}
+                                                </button>
                                             ))}
-                                        </select>
+                                        </div>
                                     </div>
 
-                                    {/* Reason Type */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">
-                                            <Tag className="w-4 h-4 inline mr-1" /> Tipo de Motivo
-                                        </label>
-                                        <select
-                                            value={formData.reasonType}
-                                            onChange={e => setFormData({ ...formData, reasonType: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="">Seleccionar motivo</option>
-                                            {RETURN_REASON_TYPES.map(r => (
-                                                <option key={r.value} value={r.value}>{r.label}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* Quantity */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">Cantidad</label>
-                                        <input
-                                            type="number"
-                                            min="1"
-                                            value={formData.quantity}
-                                            onChange={e => setFormData({ ...formData, quantity: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Identificación de Activos *</label>
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={formData.items} 
+                                            onChange={e => setFormData({ ...formData, items: e.target.value })} 
+                                            className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all placeholder:text-slate-300" 
+                                            placeholder="Describir equipos o componentes a retornar..."
                                         />
                                     </div>
 
-                                    {/* Items */}
-                                    <div className="md:col-span-2">
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">Items a Devolver</label>
-                                        <input
-                                            value={formData.items}
-                                            onChange={e => setFormData({ ...formData, items: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                            placeholder="Ej: Laptop Dell XPS 13, Cargador original"
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Cantidad Unitaria</label>
+                                            <input 
+                                                type="number" 
+                                                value={formData.quantity} 
+                                                onChange={e => setFormData({ ...formData, quantity: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none" 
+                                            />
+                                        </div>
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Estado Físico al Arribo</label>
+                                            <select 
+                                                value={formData.condition} 
+                                                onChange={e => setFormData({ ...formData, condition: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none"
+                                            >
+                                                <option value="unopened">SELLADO / ORIGINAL</option>
+                                                <option value="opened">ABIERTO / INTEGRIDAD OK</option>
+                                                <option value="damaged">DAÑADO / REVISIÓN TÉCNICA</option>
+                                                <option value="defective">DEFECTUOSO DE FÁBRICA</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Justificación de Retorno *</label>
+                                        <textarea 
+                                            required 
+                                            value={formData.reason} 
+                                            onChange={e => setFormData({ ...formData, reason: e.target.value })} 
+                                            className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all resize-none" 
+                                            rows="4" 
+                                            placeholder="Detallar causa técnica o comercial del flujo inverso..."
                                         />
                                     </div>
-
-                                    {/* Condition */}
-                                    <div>
-                                        <label className="block text-sm font-bold text-gray-700 mb-1">Condición del Producto</label>
-                                        <select
-                                            value={formData.condition}
-                                            onChange={e => setFormData({ ...formData, condition: e.target.value })}
-                                            className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        >
-                                            <option value="unopened">Sin abrir</option>
-                                            <option value="like_new">Como nuevo</option>
-                                            <option value="good">Buen estado</option>
-                                            <option value="damaged">Dañado</option>
-                                            <option value="defective">Defectuoso</option>
-                                        </select>
-                                    </div>
                                 </div>
 
-                                {/* Reason */}
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Motivo Detallado *</label>
-                                    <textarea
-                                        required
-                                        value={formData.reason}
-                                        onChange={e => setFormData({ ...formData, reason: e.target.value })}
-                                        className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        rows="3"
-                                        placeholder="Describe el motivo de la devolución..."
-                                    />
-                                </div>
-
-                                {/* Notes */}
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">Notas Internas</label>
-                                    <textarea
-                                        value={formData.notes}
-                                        onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                                        className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                        rows="2"
-                                        placeholder="Notas para el equipo interno..."
-                                    />
-                                </div>
-
-                                {/* Actions */}
-                                <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                                    <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingReturn(null); resetForm(); }}>
-                                        Cancelar
-                                    </Button>
-                                    <Button type="submit" variant="primary" disabled={loading}>
-                                        {loading ? 'Guardando...' : (editingReturn ? 'Actualizar Devolución' : 'Crear Devolución')}
-                                    </Button>
+                                <div className="flex gap-4 pt-4">
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setShowForm(false)}
+                                        className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] hover:bg-slate-200 transition-all"
+                                    >
+                                        Abortar RMA
+                                    </button>
+                                    <button 
+                                        type="submit" 
+                                        disabled={loading}
+                                        className="flex-1 py-5 bg-slate-900 text-white rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 hover:bg-black transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {loading ? <div className="w-5 h-5 border-[3px] border-white/30 border-t-white rounded-full animate-spin"></div> : (editingReturn ? 'Guardar Cambios' : 'Confirmar RMA')}
+                                    </button>
                                 </div>
                             </form>
-                        </div>
+                        </motion.div>
                     </div>
-                </div>
-            )}
+                )}
+            </PortalWrapper>
 
             {/* Resolution Modal */}
-            {showResolutionForm && selectedReturn && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-scale-in">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-purple-50 to-indigo-50">
-                            <h3 className="font-bold text-xl flex items-center gap-2">
-                                <DollarSign className="w-5 h-5 text-purple-600" />
-                                Procesar Resolución
-                            </h3>
-                            <button onClick={() => { setShowResolutionForm(false); setSelectedReturn(null); }} className="text-gray-400 hover:text-black transition-colors">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleResolution} className="p-6 space-y-4">
-                            {/* Return Info */}
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                                <p className="text-sm text-gray-500 flex items-center gap-1">
-                                    <Info className="w-4 h-4" /> Devolución #{selectedReturn.id}
-                                </p>
-                                <p className="font-bold text-gray-900">{selectedReturn.customerName}</p>
-                                <p className="text-sm text-gray-600 mt-1">{selectedReturn.reason}</p>
+            <PortalWrapper isOpen={showResolutionForm}>
+                {showResolutionForm && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowResolutionForm(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+                            className="bg-white rounded-[3.5rem] w-full max-w-xl shadow-2xl overflow-hidden relative z-10 p-10"
+                        >
+                            <div className="flex flex-col items-center text-center gap-6 mb-10">
+                                <div className="w-20 h-20 bg-indigo-50 rounded-[2rem] flex items-center justify-center text-indigo-600 shadow-inner">
+                                    <ShieldCheck className="w-10 h-10" />
+                                </div>
+                                <div className="space-y-1">
+                                    <h3 className="text-3xl font-black text-slate-900 tracking-tight leading-none uppercase">Resolución de RMA</h3>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Cierre Definitivo de Logística Inversa</p>
+                                </div>
                             </div>
 
-                            {/* Resolution Type */}
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Tipo de Resolución *</label>
-                                <select
-                                    required
-                                    value={resolutionData.resolution}
-                                    onChange={e => setResolutionData({ ...resolutionData, resolution: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
-                                >
-                                    {RESOLUTION_TYPES.map(r => (
-                                        <option key={r.value} value={r.value}>{r.label}</option>
-                                    ))}
-                                </select>
-                            </div>
+                            <form onSubmit={handleResolution} className="space-y-8">
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Protocolo de Cierre *</label>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        {RESOLUTION_TYPES.map(type => (
+                                            <button
+                                                key={type.value}
+                                                type="button"
+                                                onClick={() => setResolutionData({ ...resolutionData, resolution: type.value })}
+                                                className={`py-4 px-6 rounded-2xl text-[11px] font-black uppercase tracking-widest border-2 transition-all ${
+                                                    resolutionData.resolution === type.value 
+                                                    ? 'bg-slate-900 text-white border-slate-900 shadow-xl' 
+                                                    : 'bg-white text-slate-400 border-slate-100 hover:border-slate-300'
+                                                }`}
+                                            >
+                                                {type.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
 
-                            {/* Refund Amount (for refunds) */}
-                            {(resolutionData.resolution === 'refund' || resolutionData.resolution === 'partial_refund') && (
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-1">
-                                        Monto a Reembolsar (COP) {resolutionData.resolution === 'partial_refund' ? '*' : ''}
-                                    </label>
-                                    <input
-                                        type="number"
-                                        required={resolutionData.resolution === 'partial_refund'}
-                                        value={resolutionData.refundAmount}
-                                        onChange={e => setResolutionData({ ...resolutionData, refundAmount: e.target.value })}
-                                        className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
-                                        placeholder="0"
+                                {resolutionData.resolution === 'refund' && (
+                                    <div className="space-y-3 animate-fade-in">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Monto a Liquidar *</label>
+                                        <div className="relative">
+                                            <div className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 font-black">$</div>
+                                            <input 
+                                                required 
+                                                type="number" 
+                                                value={resolutionData.refundAmount} 
+                                                onChange={e => setResolutionData({ ...resolutionData, refundAmount: e.target.value })} 
+                                                className="w-full pl-12 pr-8 py-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-xl font-black text-emerald-600 focus:bg-white focus:border-emerald-100 outline-none transition-all placeholder:text-slate-300" 
+                                                placeholder="0.00"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className="space-y-3">
+                                    <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Notas de Resolución</label>
+                                    <textarea 
+                                        value={resolutionData.notes} 
+                                        onChange={e => setResolutionData({ ...resolutionData, notes: e.target.value })} 
+                                        className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all resize-none italic" 
+                                        rows="3" 
+                                        placeholder="Declaración final de cierre de caso..."
                                     />
                                 </div>
-                            )}
 
-                            {/* Resolution Notes */}
-                            <div>
-                                <label className="block text-sm font-bold text-gray-700 mb-1">Notas de Resolución</label>
-                                <textarea
-                                    value={resolutionData.notes}
-                                    onChange={e => setResolutionData({ ...resolutionData, notes: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-purple-500"
-                                    rows="3"
-                                    placeholder="Detalles adicionales de la resolución..."
-                                />
-                            </div>
-
-                            {/* Actions */}
-                            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                                <Button type="button" variant="outline" onClick={() => { setShowResolutionForm(false); setSelectedReturn(null); }}>
-                                    Cancelar
-                                </Button>
-                                <Button type="submit" variant="primary" disabled={loading}>
-                                    {loading ? 'Procesando...' : 'Procesar Resolución'}
-                                </Button>
-                            </div>
-                        </form>
+                                <div className="flex gap-4 pt-4">
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setShowResolutionForm(false)}
+                                        className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] hover:bg-slate-200 transition-all"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button 
+                                        type="submit" 
+                                        disabled={loading}
+                                        className="flex-1 py-5 bg-slate-900 text-white rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 hover:bg-black transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {loading ? <div className="w-5 h-5 border-[3px] border-white/30 border-t-white rounded-full animate-spin"></div> : 'Sellar Caso'}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
                     </div>
-                </div>
-            )}
+                )}
+            </PortalWrapper>
 
-            {/* Detail Modal */}
-            {showDetailModal && detailReturn && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-in max-h-[90vh] flex flex-col">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-gray-50 to-gray-100 flex-shrink-0">
-                            <h3 className="font-bold text-xl flex items-center gap-2">
-                                <Eye className="w-5 h-5 text-gray-600" />
-                                Detalle de Devolución #{detailReturn.id}
-                            </h3>
-                            <button onClick={() => { setShowDetailModal(false); setDetailReturn(null); }} className="text-gray-400 hover:text-black transition-colors">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <div className="overflow-y-auto flex-1 p-6 space-y-6">
-                            {/* Status Badge */}
-                            <div className="flex items-center gap-4">
-                                {getStatusBadge(detailReturn.status)}
-                                <span className="text-sm text-gray-500">
-                                    {new Date(detailReturn.createdAt || detailReturn.date).toLocaleDateString('es-CO', {
-                                        year: 'numeric',
-                                        month: 'long',
-                                        day: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit'
-                                    })}
-                                </span>
-                            </div>
-
-                            {/* Info Grid */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <p className="text-xs text-gray-500 mb-1">Cliente</p>
-                                    <p className="font-bold text-gray-900">{detailReturn.customerName}</p>
-                                    {detailReturn.customerEmail && (
-                                        <p className="text-sm text-gray-600">{detailReturn.customerEmail}</p>
-                                    )}
+            {/* Detail View Modal */}
+            <PortalWrapper isOpen={showDetailModal && detailReturn}>
+                {showDetailModal && detailReturn && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowDetailModal(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+                            className="bg-white rounded-[3.5rem] w-full max-w-xl shadow-2xl overflow-hidden relative z-10"
+                        >
+                            <div className="p-10 bg-slate-900 text-white relative">
+                                <div className="absolute top-0 right-0 p-10 opacity-10">
+                                    <RotateCcw className="w-48 h-48" />
                                 </div>
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <p className="text-xs text-gray-500 mb-1">Pedido Relacionado</p>
-                                    <p className="font-bold text-gray-900">#{detailReturn.orderId}</p>
+                                <div className="flex justify-between items-start relative z-10">
+                                    <div className="space-y-6">
+                                        <div className={`w-fit px-4 py-1.5 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest ${getStatusStyle(detailReturn.status)} bg-white/5 border-white/20`}>
+                                            {RETURN_STATUS_CONFIG[detailReturn.status]?.label || detailReturn.status}
+                                        </div>
+                                        <div>
+                                            <h3 className="text-4xl font-black tracking-tighter leading-tight uppercase">RMA-#{detailReturn.id}</h3>
+                                            <p className="text-white/40 text-[11px] font-black uppercase tracking-[0.3em] italic">{detailReturn.customerName} • ORDEN #{detailReturn.orderId}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowDetailModal(false)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-2xl transition-all"><X className="w-6 h-6 text-white" /></button>
                                 </div>
                             </div>
-
-                            {/* Reason */}
-                            <div className="bg-gray-50 p-4 rounded-lg">
-                                <p className="text-xs text-gray-500 mb-1">Motivo de Devolución</p>
-                                <p className="font-medium text-gray-900">{detailReturn.reason}</p>
-                                {detailReturn.reasonType && (
-                                    <span className="inline-flex items-center gap-1 mt-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                                        <Tag className="w-3 h-3" />
-                                        {RETURN_REASON_TYPES.find(r => r.value === detailReturn.reasonType)?.label || detailReturn.reasonType}
-                                    </span>
-                                )}
-                            </div>
-
-                            {/* Items & Condition */}
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <p className="text-xs text-gray-500 mb-1">Items</p>
-                                    <p className="font-medium text-gray-900">{detailReturn.items || '-'}</p>
-                                    {detailReturn.quantity && (
-                                        <p className="text-sm text-gray-600">Cantidad: {detailReturn.quantity}</p>
-                                    )}
+                            
+                            <div className="p-10 space-y-10">
+                                <div className="grid grid-cols-2 gap-10">
+                                    <div className="space-y-2">
+                                        <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Activos en Retorno</p>
+                                        <p className="font-black text-slate-900 text-xl tracking-tight">{detailReturn.items}</p>
+                                        <p className="text-sm font-bold text-slate-500 italic">Unidades: {detailReturn.quantity || 1}</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Identificador de Origen</p>
+                                        <p className="font-black text-slate-900 text-xl tracking-tight">PEDIDO-#{detailReturn.orderId}</p>
+                                        <p className="text-sm font-bold text-slate-500 italic">Fecha: {new Date(detailReturn.createdAt).toLocaleDateString()}</p>
+                                    </div>
                                 </div>
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <p className="text-xs text-gray-500 mb-1">Condición</p>
-                                    <p className="font-medium text-gray-900 capitalize">{detailReturn.condition || '-'}</p>
-                                </div>
-                            </div>
 
-                            {/* Resolution Info */}
-                            {detailReturn.resolution && (
-                                <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-                                    <p className="text-xs text-green-700 mb-1">Resolución</p>
-                                    <p className="font-bold text-green-900">
-                                        {RESOLUTION_TYPES.find(r => r.value === detailReturn.resolution)?.label || detailReturn.resolution}
-                                    </p>
+                                <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-6 border border-slate-100">
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
+                                            <AlertTriangle className="w-5 h-5 text-indigo-500" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Motivación del Flujo</p>
+                                            <p className="font-black text-slate-900 italic line-clamp-2">"{detailReturn.reason}"</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
+                                            <Box className="w-5 h-5 text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Estado Físico Verificado</p>
+                                            <p className="font-black text-slate-900 uppercase tracking-tighter">{detailReturn.condition || 'AUDITORÍA PENDIENTE'}</p>
+                                        </div>
+                                    </div>
                                     {detailReturn.refundAmount && (
-                                        <p className="text-lg font-bold text-green-700 mt-1">
-                                            {formatPrice(detailReturn.refundAmount)}
-                                        </p>
+                                        <div className="flex items-center gap-5 pt-4 border-t border-slate-100">
+                                            <div className="w-12 h-12 bg-emerald-50 rounded-2xl flex items-center justify-center shadow-sm border border-emerald-100">
+                                                <DollarSign className="w-5 h-5 text-emerald-600" />
+                                            </div>
+                                            <div>
+                                                <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Liquidación RMA</p>
+                                                <p className="font-black text-2xl text-emerald-700 tracking-tighter">{formatPrice(detailReturn.refundAmount)}</p>
+                                            </div>
+                                        </div>
                                     )}
                                 </div>
-                            )}
 
-                            {/* Notes */}
-                            {detailReturn.notes && (
-                                <div className="bg-gray-50 p-4 rounded-lg">
-                                    <p className="text-xs text-gray-500 mb-1">Notas</p>
-                                    <p className="text-gray-700">{detailReturn.notes}</p>
+                                <div className="flex gap-4 pt-4">
+                                    <motion.button 
+                                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                        onClick={() => setShowDetailModal(false)}
+                                        className="flex-1 py-5 bg-slate-900 text-white rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 hover:bg-black transition-all"
+                                    >
+                                        Finalizar Inspección
+                                    </motion.button>
                                 </div>
-                            )}
-                        </div>
-
-                        {/* Actions Footer */}
-                        <div className="p-4 border-t border-gray-100 flex justify-end gap-2 bg-gray-50">
-                            {detailReturn.status === 'pending' && (
-                                <>
-                                    <Button onClick={() => { handleApprove(detailReturn.id); setShowDetailModal(false); }} className="bg-green-600 hover:bg-green-700">
-                                        <Check className="w-4 h-4 mr-1" /> Aprobar
-                                    </Button>
-                                    <Button onClick={() => { handleReject(detailReturn.id); setShowDetailModal(false); }} variant="outline" className="text-red-600 border-red-200 hover:bg-red-50">
-                                        <XCircle className="w-4 h-4 mr-1" /> Rechazar
-                                    </Button>
-                                </>
-                            )}
-                            {detailReturn.status === 'approved' && (
-                                <Button onClick={() => { handleMarkReceived(detailReturn.id); setShowDetailModal(false); }} className="bg-purple-600 hover:bg-purple-700">
-                                    <Package className="w-4 h-4 mr-1" /> Marcar Recibida
-                                </Button>
-                            )}
-                            {detailReturn.status === 'received' && (
-                                <Button onClick={() => {
-                                    setShowDetailModal(false);
-                                    setSelectedReturn(detailReturn);
-                                    setResolutionData({ ...resolutionData, refundAmount: detailReturn.refundAmount || '' });
-                                    setShowResolutionForm(true);
-                                }} className="bg-blue-600 hover:bg-blue-700">
-                                    <DollarSign className="w-4 h-4 mr-1" /> Procesar Resolución
-                                </Button>
-                            )}
-                            <Button variant="outline" onClick={() => { setShowDetailModal(false); setDetailReturn(null); }}>
-                                Cerrar
-                            </Button>
-                        </div>
+                            </div>
+                        </motion.div>
                     </div>
-                </div>
-            )}
-
+                )}
+            </PortalWrapper>
         </AdminLayout>
     );
 };

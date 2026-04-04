@@ -36,8 +36,11 @@ const TechLogin = () => {
                 return;
             }
 
-            // VALIDACIÓN ESTRICTA DE ROL PARA INGRESO TÉCNICO
-            if (data.user && data.user.role !== 'técnico') {
+            // VALIDACIÓN DE ROL PARA INGRESO TÉCNICO
+            const userRole = data.user?.role?.toLowerCase() || '';
+            const isTechnician = ['técnico', 'tecnico', 'technician'].includes(userRole);
+            
+            if (data.user && !isTechnician) {
                  showAlert({
                     title: 'Acceso Denegado',
                     message: 'Esta área es exclusiva para personal técnico. Verifique sus credenciales e intente en el acceso general.',

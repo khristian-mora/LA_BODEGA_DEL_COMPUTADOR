@@ -1,0 +1,12 @@
+{
+  "ignore": [
+    "server/uploads/*",
+    "server/database.sqlite*",
+    "server/backups/*",
+    "*.log",
+    ".git"
+  ],
+  "watch": ["server/"],
+  "ext": "js,json,html",
+  "delay": "1000"
+}

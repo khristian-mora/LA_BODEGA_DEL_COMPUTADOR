@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ShopProvider } from './context/ShopContext';
 import { SettingsProvider } from './context/SettingsContext';
@@ -19,32 +19,42 @@ import ResetPassword from './pages/ResetPassword';
 import Support from './pages/Support';
 import Enterprise from './pages/Enterprise';
 import Builder from './pages/Builder';
-import AdminDashboard from './pages/admin/Dashboard';
-import AdminOrders from './pages/admin/Orders';
-import AdminInventory from './pages/admin/Inventory';
-import AdminSuppliers from './pages/admin/Suppliers';
-import AdminMarketing from './pages/admin/Marketing';
-import AdminTechService from './pages/admin/TechService';
-import AdminHR from './pages/admin/HumanResources';
-import AdminFinance from './pages/admin/Finance';
-import AdminReturns from './pages/admin/Returns';
 import AdminLogin from './pages/admin/Login';
 import TechLogin from './pages/admin/TechLogin';
-
-import AdminUsers from './pages/admin/Users';
-import AdminCustomers from './pages/admin/Customers';
-import AdminAppointments from './pages/admin/Appointments';
-import AdminReports from './pages/admin/Reports';
-import AdminWarranties from './pages/admin/Warranties';
-import AdminCoupons from './pages/admin/Coupons';
-import AdminAudit from './pages/admin/Audit';
-import AdminSettings from './pages/admin/Settings';
 import PrivacyPolicy from './pages/legal/PrivacyPolicy';
 import CookiePolicy from './pages/legal/CookiePolicy';
 import TermsOfService from './pages/legal/TermsOfService';
+import Profile from './pages/Profile';
 import CookieConsent from './components/CookieConsent';
 import { AuditProvider } from './context/AuditContext';
 import NotFound from './pages/NotFound';
+
+const AdminDashboard = lazy(() => import('./pages/admin/Dashboard'));
+const AdminOrders = lazy(() => import('./pages/admin/Orders'));
+const AdminInventory = lazy(() => import('./pages/admin/Inventory'));
+const AdminSuppliers = lazy(() => import('./pages/admin/Suppliers'));
+const AdminMarketing = lazy(() => import('./pages/admin/Marketing'));
+const AdminTechService = lazy(() => import('./pages/admin/TechService'));
+const AdminHR = lazy(() => import('./pages/admin/HumanResources'));
+const AdminFinance = lazy(() => import('./pages/admin/Finance'));
+const AdminReturns = lazy(() => import('./pages/admin/Returns'));
+const AdminUsers = lazy(() => import('./pages/admin/Users'));
+const AdminCustomers = lazy(() => import('./pages/admin/Customers'));
+const AdminAppointments = lazy(() => import('./pages/admin/Appointments'));
+const AdminReports = lazy(() => import('./pages/admin/Reports'));
+const AdminWarranties = lazy(() => import('./pages/admin/Warranties'));
+const AdminCoupons = lazy(() => import('./pages/admin/Coupons'));
+const AdminAudit = lazy(() => import('./pages/admin/Audit'));
+const AdminSettings = lazy(() => import('./pages/admin/Settings'));
+
+const LoadingSpinner = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-12 h-12 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+      <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Cargando...</p>
+    </div>
+  </div>
+);
 
 function App() {
   return (
@@ -54,7 +64,8 @@ function App() {
           <ModalProvider>
             <Router>
               <ScrollToTop />
-              <Routes>
+              <Suspense fallback={<LoadingSpinner />}>
+                <Routes>
                 {/* Public Routes */}
                 <Route path="/" element={<Home />} />
                 <Route path="/catalog" element={<Catalog />} />
@@ -76,6 +87,7 @@ function App() {
                 <Route path="/register" element={<Register />} />
                 <Route path="/forgot-password" element={<ForgotPassword />} />
                 <Route path="/reset-password" element={<ResetPassword />} />
+                <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
 
                 {/* Admin Routes — pública: solo /admin/login */}
                 <Route path="/admin/login" element={<AdminLogin />} />
@@ -87,7 +99,7 @@ function App() {
                 <Route path="/admin/inventory" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'vendedor']}><AdminInventory /></RoleProtectedRoute>} />
                 <Route path="/admin/suppliers" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'finanzas']}><AdminSuppliers /></RoleProtectedRoute>} />
                 <Route path="/admin/marketing" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'marketing']}><AdminMarketing /></RoleProtectedRoute>} />
-                <Route path="/admin/tech-service" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'técnico']}><AdminTechService /></RoleProtectedRoute>} />
+                <Route path="/admin/tech-service" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'técnico', 'vendedor']}><AdminTechService /></RoleProtectedRoute>} />
                 <Route path="/admin/hr" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'rh']}><AdminHR /></RoleProtectedRoute>} />
                 <Route path="/admin/finance" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'finanzas']}><AdminFinance /></RoleProtectedRoute>} />
                 <Route path="/admin/returns" element={<RoleProtectedRoute allowedRoles={['admin', 'gerente', 'vendedor']}><AdminReturns /></RoleProtectedRoute>} />
@@ -108,6 +120,7 @@ function App() {
                 {/* Catch-all Route for 404 */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </Suspense>
               <CookieConsent />
             </Router>
           </ModalProvider>

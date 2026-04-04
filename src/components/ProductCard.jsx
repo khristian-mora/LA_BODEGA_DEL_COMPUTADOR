@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Star, ShoppingCart, Eye } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -96,6 +96,7 @@ const ProductCard = ({ product }) => {
                     <motion.img
                         src={buildUploadUrl(product.image) || PLACEHOLDER_IMAGE}
                         alt={product.name}
+                        crossOrigin="anonymous"
                         className="w-full h-full object-contain mix-blend-multiply"
                         onError={(e) => {
                             // Si la imagen externa falla, usar placeholder
@@ -160,4 +161,4 @@ const ProductCard = ({ product }) => {
     );
 };
 
-export default ProductCard;
+export default memo(ProductCard);

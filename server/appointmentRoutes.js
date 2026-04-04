@@ -1,5 +1,6 @@
 // Appointment Management Endpoints
 import { db } from './db.js';
+import * as notificationService from './notificationService.js';
 
 // Get all appointments with pagination, filtering, and search
 export const getAppointments = (req, res) => {
@@ -346,11 +347,13 @@ export const createAppointment = (req, res) => {
         return res.status(400).json({ error: 'El tipo de servicio es requerido (mínimo 2 caracteres)' });
     }
     
-    // Validate date is not in the past
+    // Validate date is not in the past (with a 30-minute buffer for flexibility)
     const appointmentDate = new Date(scheduledDate);
-    const now = new Date();
-    if (appointmentDate < now) {
-        return res.status(400).json({ error: 'La fecha de la cita no puede ser en el pasado' });
+    const nowWithBuffer = new Date();
+    nowWithBuffer.setMinutes(nowWithBuffer.getMinutes() - 30); // 30 mins grace period
+    
+    if (appointmentDate < nowWithBuffer) {
+        return res.status(400).json({ error: 'La fecha de la cita no puede ser en el pasado lejano (>30 mins atrás)' });
     }
     
     // Validate duration if provided
@@ -385,6 +388,11 @@ export const createAppointment = (req, res) => {
             
             // Log activity
             logActivity(req.user.id, 'CREATE', 'appointments', `Cita creada para ${scheduledDate} - ${serviceType}`);
+            
+            // Notify assigned technician and customer
+            if (technicianId) {
+                notificationService.notifyAssignment(this.lastID);
+            }
             
             res.json({ 
                 id: this.lastID, 
@@ -466,6 +474,11 @@ export const updateAppointment = (req, res) => {
             
             // Log activity
             logActivity(req.user.id, 'UPDATE', 'appointments', `Cita #${req.params.id} actualizada`);
+            
+            // If technician was changed or reassigned, notify
+            if (technicianId && (technicianId !== existing.technicianId)) {
+                notificationService.notifyAssignment(req.params.id);
+            }
             
             res.json({ success: true });
         });
@@ -555,6 +568,11 @@ export const exportAppointments = (req, res) => {
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
+        const { format = 'csv' } = req.query;
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
         // Convert to CSV
         const headers = ['ID', 'Fecha', 'Hora', 'Servicio', 'Estado', 'Duración (min)', 'Cliente', 'Email', 'Teléfono', 'Técnico', 'Notas', 'Recordatorio', 'Creado'];
         const csvRows = rows.map(row => {
@@ -610,27 +628,21 @@ export const deleteAppointment = (req, res) => {
 
 // Get appointments by date range (legacy support)
 export const getAppointmentsByDateRange = (req, res) => {
-    const { startDate, endDate } = req.query;
-
-    const sql = `
-        SELECT a.*, 
-               c.name as customerName, c.phone as customerPhone,
-               u.name as technicianName
-        FROM appointments a
-        LEFT JOIN customers c ON a.customerId = c.id
-        LEFT JOIN users u ON a.technicianId = u.id
-        WHERE a.scheduledDate >= ? AND a.scheduledDate <= ?
-        ORDER BY a.scheduledDate ASC
-    `;
-
-    db.all(sql, [startDate, endDate], (err, rows) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        res.json(rows);
-    });
+    // ... code ...
 };
+
+// Send daily reminders manually
+export const sendDailyReminders = async (req, res) => {
+    try {
+        const count = await notificationService.sendDailyReminders();
+        res.json({ success: true, count, message: `Se enviaron ${count} recordatorios para hoy.` });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+};
+
+// Helper function to log activity
+// ... existing logActivity ...
 
 // Helper function to log activity
 const logActivity = (userId, action, module, details) => {

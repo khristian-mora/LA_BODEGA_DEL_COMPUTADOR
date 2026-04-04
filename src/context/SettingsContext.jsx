@@ -14,7 +14,10 @@ export const SettingsProvider = ({ children }) => {
         whatsappNumber: '317 653 2488',
         businessName: 'LA BODEGA DEL COMPUTADOR',
         businessAddress: 'Cl. 49 #13-13, Barrancabermeja',
-        businessEmail: 'ventas@labodegadelcomputador.com'
+        businessEmail: 'ventas@labodegadelcomputador.com',
+        cat1_image: '/src/assets/hero_laptop.png',
+        cat2_image: '/src/assets/hero_gaming_pc.png',
+        cat3_image: '/src/assets/hero_kb_mouse.png'
     });
     const [loading, setLoading] = useState(true);
 
@@ -44,8 +47,15 @@ export const SettingsProvider = ({ children }) => {
         return false;
     };
 
+    const value = React.useMemo(() => ({
+        settings,
+        updateGlobalSettings,
+        refreshSettings: fetchSettings,
+        loading
+    }), [settings, loading]);
+
     return (
-        <SettingsContext.Provider value={{ settings, updateGlobalSettings, refreshSettings: fetchSettings, loading }}>
+        <SettingsContext.Provider value={value}>
             {children}
         </SettingsContext.Provider>
     );

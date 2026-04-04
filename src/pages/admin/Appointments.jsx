@@ -11,11 +11,16 @@ import {
     Calendar, Plus, Edit2, Trash2, X, Clock, User, Wrench, CheckCircle, XCircle,
     Download, Filter, Search, RefreshCw, TrendingUp, AlertTriangle, Eye,
     BarChart3, UserX, CalendarCheck, CalendarX, CalendarDays, AlertCircle,
-    ChevronLeft, ChevronRight, Check, MapPin, Phone, Mail
+    ChevronLeft, ChevronRight, Check, MapPin, Phone, Mail, ArrowRight, Activity
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import PortalWrapper from '../../components/PortalWrapper';
 import Button from '../../components/Button';
 import { useModal } from '../../context/ModalContext';
+import { customerService } from '../../services/customerService';
 import { buildApiUrl } from '../../config/config';
+import * as XLSX from 'xlsx';
+import { ticketService } from '../../services/ticketService';
 
 const AdminAppointments = () => {
     const { showConfirm, showAlert } = useModal();
@@ -24,8 +29,14 @@ const AdminAppointments = () => {
     const [appointments, setAppointments] = useState([]);
     const [customers, setCustomers] = useState([]);
     const [technicians, setTechnicians] = useState([]);
-    const [statistics, setStatistics] = useState(null);
+    const [statistics, setStatistics] = useState({});
     const [loading, setLoading] = useState(true);
+
+    const user = JSON.parse(localStorage.getItem('adminUser') || '{}');
+    const userRole = user.role || 'técnico';
+    const isAdmin = userRole === 'admin';
+    const isVendedor = userRole === 'vendedor';
+    const canModify = isAdmin || isVendedor;
 
     // Modal states
     const [showForm, setShowForm] = useState(false);
@@ -57,38 +68,26 @@ const AdminAppointments = () => {
         status: 'Pending'
     });
 
-    // Load initial data
     useEffect(() => {
         fetchCustomersAndTechnicians();
     }, []);
 
-    // Load appointments when filters change
     useEffect(() => {
         fetchAppointments();
     }, [currentPage, filterStatus, filterServiceType, filterTechnician, searchTerm, dateRange]);
 
-    // Load statistics when period changes
     useEffect(() => {
         fetchStatistics();
     }, [statsPeriod]);
 
     const fetchCustomersAndTechnicians = async () => {
         try {
-            const token = localStorage.getItem('adminToken');
-            const headers = { 'Authorization': `Bearer ${token}` };
-
-            const [customersRes, usersRes] = await Promise.all([
-                fetch(buildApiUrl('/customers'), { headers }),
-                fetch(buildApiUrl('/users'), { headers })
+            const [customersData, usersData] = await Promise.all([
+                customerService.getAllCustomers(),
+                ticketService.getTechnicians()
             ]);
-
-            if (!customersRes.ok || !usersRes.ok) throw new Error('Failed to fetch');
-
-            const customersData = await customersRes.json();
-            const usersData = await usersRes.json();
-
-            setCustomers(customersData.customers || customersData || []);
-            setTechnicians((usersData.users || usersData || []).filter(u => u.role === 'technician' || u.role === 'admin'));
+            setCustomers(Array.isArray(customersData) ? customersData : (customersData.customers || []));
+            setTechnicians(usersData || []);
         } catch (error) {
             console.error('Error fetching customers/technicians:', error);
         }
@@ -107,18 +106,12 @@ const AdminAppointments = () => {
                 startDate: dateRange.start || undefined,
                 endDate: dateRange.end || undefined
             };
-
             const data = await appointmentService.getAppointments(params);
             setAppointments(data.appointments || []);
             setTotalPages(data.pagination?.totalPages || 1);
             setTotalItems(data.pagination?.total || 0);
         } catch (error) {
             console.error('Error fetching appointments:', error);
-            showAlert({
-                title: 'Error',
-                message: 'Error al cargar las citas',
-                type: 'error'
-            });
         } finally {
             setLoading(false);
         }
@@ -127,7 +120,7 @@ const AdminAppointments = () => {
     const fetchStatistics = async () => {
         try {
             const data = await appointmentService.getAppointmentStats(statsPeriod);
-            setStatistics(data);
+            setStatistics(data || {});
         } catch (error) {
             console.error('Error fetching statistics:', error);
         }
@@ -136,22 +129,13 @@ const AdminAppointments = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
-
         try {
             if (editingAppointment) {
                 await appointmentService.updateAppointment(editingAppointment.id, formData);
-                await showAlert({
-                    title: 'Éxito',
-                    message: 'Cita actualizada correctamente',
-                    type: 'success'
-                });
+                showAlert({ title: 'Éxito', message: 'Cita actualizada correctamente', type: 'success' });
             } else {
                 await appointmentService.createAppointment(formData);
-                await showAlert({
-                    title: 'Éxito',
-                    message: 'Cita creada correctamente',
-                    type: 'success'
-                });
+                showAlert({ title: 'Éxito', message: 'Cita creada correctamente', type: 'success' });
             }
             setShowForm(false);
             setEditingAppointment(null);
@@ -159,11 +143,7 @@ const AdminAppointments = () => {
             fetchAppointments();
             fetchStatistics();
         } catch (error) {
-            showAlert({
-                title: 'Error',
-                message: error.message,
-                type: 'error'
-            });
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -186,33 +166,79 @@ const AdminAppointments = () => {
     const handleDelete = async (appointmentId) => {
         const confirmed = await showConfirm({
             title: 'Confirmar eliminación',
-            message: '¿Estás seguro de eliminar esta cita? Esta acción no se puede deshacer.',
+            message: '¿Estás seguro de eliminar esta cita?',
             variant: 'danger'
         });
         if (!confirmed) return;
-
         try {
             await appointmentService.deleteAppointment(appointmentId);
-            await showAlert({
-                title: 'Eliminada',
-                message: 'Cita eliminada correctamente',
-                type: 'success'
-            });
+            showAlert({ title: 'Eliminada', message: 'Cita eliminada correctamente', type: 'success' });
             fetchAppointments();
             fetchStatistics();
         } catch (error) {
-            showAlert({
-                title: 'Error',
-                message: error.message,
-                type: 'error'
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
+        }
+    };
+
+    const handleExport = async () => {
+        try {
+            setLoading(true);
+            const token = localStorage.getItem('adminToken');
+            const response = await fetch(buildApiUrl(`/api/appointments/export?format=json&token=${token}`));
+            
+            if (!response.ok) throw new Error('Error al obtener datos de exportación');
+            
+            const allAppointments = await response.json();
+            
+            const headers = [['ID', 'Cliente', 'Cliente_Tel', 'Técnico', 'Servicio', 'Fecha', 'Hora', 'Estado', 'Notas']];
+            const dataToExport = allAppointments.map(app => [
+                app.id,
+                app.customerName || '',
+                app.customerPhone || '',
+                app.technicianName || '',
+                app.serviceType || '',
+                app.scheduledDate ? new Date(app.scheduledDate).toLocaleDateString() : '',
+                app.scheduledDate ? new Date(app.scheduledDate).toLocaleTimeString() : '',
+                app.status || '',
+                app.notes || ''
+            ]);
+            
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.aoa_to_sheet([...headers, ...dataToExport]);
+            XLSX.utils.book_append_sheet(wb, ws, "Citas");
+            XLSX.writeFile(wb, "Citas_LBDC.xlsx");
+        } catch (error) {
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleSendReminders = async () => {
+        try {
+            setLoading(true);
+            const token = localStorage.getItem('adminToken');
+            const response = await fetch(buildApiUrl('/api/appointments/reminders/daily'), {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
             });
+            const data = await response.json();
+            if (response.ok) {
+                showAlert({ title: 'Éxito', message: data.message, type: 'success' });
+            } else {
+                throw new Error(data.error || 'Error enviando recordatorios');
+            }
+        } catch (error) {
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
+        } finally {
+            setLoading(false);
         }
     };
 
     const handleStatusChange = async (appointmentId, newStatus) => {
         try {
             await appointmentService.updateAppointmentStatus(appointmentId, newStatus);
-            await showAlert({
+            showAlert({
                 title: 'Estado actualizado',
                 message: `Cita marcada como: ${APPOINTMENT_STATUS_CONFIG[newStatus]?.label || newStatus}`,
                 type: 'success'
@@ -220,28 +246,7 @@ const AdminAppointments = () => {
             fetchAppointments();
             fetchStatistics();
         } catch (error) {
-            showAlert({
-                title: 'Error',
-                message: error.message,
-                type: 'error'
-            });
-        }
-    };
-
-    const handleExport = async () => {
-        try {
-            await appointmentService.exportAppointments({
-                status: filterStatus || undefined,
-                technicianId: filterTechnician || undefined,
-                startDate: dateRange.start || undefined,
-                endDate: dateRange.end || undefined
-            });
-        } catch (error) {
-            showAlert({
-                title: 'Error',
-                message: 'Error al exportar las citas',
-                type: 'error'
-            });
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
         }
     };
 
@@ -257,41 +262,6 @@ const AdminAppointments = () => {
         });
     };
 
-    const clearFilters = () => {
-        setFilterStatus('');
-        setFilterServiceType('');
-        setFilterTechnician('');
-        setSearchTerm('');
-        setDateRange({ start: '', end: '' });
-        setCurrentPage(1);
-    };
-
-    // Status badge component
-    const getStatusBadge = (status) => {
-        const config = APPOINTMENT_STATUS_CONFIG[status] || APPOINTMENT_STATUS_CONFIG[APPOINTMENT_STATUSES.PENDING];
-        return (
-            <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${config.color}`}>
-                {config.label}
-            </span>
-        );
-    };
-
-    // Service type badge
-    const getServiceBadge = (serviceType) => {
-        const service = SERVICE_TYPES.find(s => s.value === serviceType);
-        return service ? (
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${service.color}`}>
-                {service.label}
-            </span>
-        ) : <span className="text-gray-500 text-xs">{serviceType}</span>;
-    };
-
-    // Get available status transitions for an appointment
-    const getAvailableTransitions = (currentStatus) => {
-        return STATUS_TRANSITIONS[currentStatus] || [];
-    };
-
-    // Format date and time
     const formatDateTime = (dateString) => {
         const date = new Date(dateString);
         return {
@@ -300,435 +270,310 @@ const AdminAppointments = () => {
         };
     };
 
+    const getStatusStyle = (status) => {
+        switch (status) {
+            case 'Completed': return 'bg-emerald-500/10 text-emerald-600 border-emerald-200';
+            case 'Cancelled': return 'bg-red-500/10 text-red-600 border-red-200';
+            case 'Confirmed': return 'bg-blue-500/10 text-blue-600 border-blue-200';
+            case 'No-Show': return 'bg-orange-500/10 text-orange-600 border-orange-200';
+            default: return 'bg-amber-500/10 text-amber-600 border-amber-200';
+        }
+    };
+
     return (
         <AdminLayout title="Agenda de Citas">
-            <div className="space-y-6 animate-fade-in-up">
+            <div className="space-y-6 pb-12">
+                
+                {/* Industrial KPI Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                        className="bg-white/70 backdrop-blur-xl p-5 rounded-3xl border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 transition-transform group-hover:scale-110">
+                                <CalendarDays className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Total Citas</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{statistics.summary?.totalAppointments || 0}</h4>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Registradas</p>
+                        </div>
+                    </motion.div>
 
-                {/* Header */}
-                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <div>
-                        <h2 className="font-bold text-gray-800 text-xl flex items-center gap-2">
-                            <Calendar className="w-6 h-6 text-indigo-600" />
-                            Sistema de Gestión de Citas
-                        </h2>
-                        <p className="text-sm text-gray-500 mt-1">Programa, gestiona y da seguimiento a servicios técnicos</p>
-                    </div>
-                    <div className="flex gap-2">
-                        <Button onClick={handleExport} variant="outline" className="flex items-center gap-2">
-                            <Download className="w-4 h-4" /> Exportar CSV
-                        </Button>
-                        <Button onClick={() => { setEditingAppointment(null); resetForm(); setShowForm(true); }} className="flex items-center gap-2">
-                            <Plus className="w-4 h-4" /> Nueva Cita
-                        </Button>
-                    </div>
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                        className="bg-white/70 backdrop-blur-xl p-5 rounded-3xl border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-amber-50 rounded-2xl text-amber-600 transition-transform group-hover:scale-110">
+                                <Clock className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-amber-500 bg-amber-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Pendientes</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{statistics.summary?.pendingAppointments || 0}</h4>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Por Confirmar</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+                        className="bg-white/70 backdrop-blur-xl p-5 rounded-3xl border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 transition-transform group-hover:scale-110">
+                                <CheckCircle className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-emerald-500 bg-emerald-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Completadas</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{statistics.summary?.completedAppointments || 0}</h4>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Servicios Exitosos</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                        className="bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-2xl relative overflow-hidden group"
+                    >
+                        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-150 transition-transform">
+                            <Activity className="w-24 h-24 text-white" />
+                        </div>
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                            <div className="p-3 bg-white/10 rounded-2xl text-white">
+                                <TrendingUp className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-white/50 bg-white/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Eficiencia</span>
+                        </div>
+                        <div className="space-y-1 relative z-10">
+                            <h4 className="text-3xl font-black text-white tracking-tighter">{Math.round((statistics.summary?.completedAppointments / statistics.summary?.totalAppointments) * 100) || 0}%</h4>
+                            <p className="text-xs font-bold text-white/40 uppercase">Tasa de Conclusión</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }}
+                        className="bg-white/70 backdrop-blur-xl p-5 rounded-3xl border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-red-50 rounded-2xl text-red-600 transition-transform group-hover:scale-110">
+                                <UserX className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-red-500 bg-red-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">No-Asistió</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-3xl font-black text-slate-900 tracking-tighter">{statistics.summary?.noShowAppointments || 0}</h4>
+                            <p className="text-xs font-bold text-slate-500 uppercase">Ausentismo</p>
+                        </div>
+                    </motion.div>
                 </div>
 
-                {/* Statistics Cards */}
-                {statistics && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 gap-4 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-                        {/* Total Appointments */}
-                        <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <CalendarDays className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">Total</span>
+                <div className="bg-white/70 backdrop-blur-2xl rounded-[2.5rem] shadow-2xl border border-white/50 overflow-hidden">
+                    {/* Industrial Toolbar */}
+                    <div className="p-8 border-b border-gray-100/50 flex flex-col lg:flex-row justify-between items-center bg-gray-50/20 gap-6">
+                        <div className="flex items-center gap-5">
+                            <div className="w-14 h-14 bg-slate-900 rounded-[1.25rem] flex items-center justify-center shadow-2xl shadow-slate-200">
+                                <Calendar className="w-7 h-7 text-white" />
                             </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.totalAppointments || 0}</p>
-                            <p className="text-xs opacity-80">Citas</p>
-                        </div>
-
-                        {/* Pending */}
-                        <div className="bg-gradient-to-br from-yellow-500 to-yellow-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <Clock className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">Pendientes</span>
-                            </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.pendingAppointments || 0}</p>
-                            <p className="text-xs opacity-80">Por confirmar</p>
-                        </div>
-
-                        {/* Confirmed */}
-                        <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <CalendarCheck className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">Confirmadas</span>
-                            </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.confirmedAppointments || 0}</p>
-                            <p className="text-xs opacity-80">Programadas</p>
-                        </div>
-
-                        {/* Completed */}
-                        <div className="bg-gradient-to-br from-green-500 to-green-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <CheckCircle className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">Completadas</span>
-                            </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.completedAppointments || 0}</p>
-                            <p className="text-xs opacity-80">Servicios OK</p>
-                        </div>
-
-                        {/* Cancelled */}
-                        <div className="bg-gradient-to-br from-red-500 to-red-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <CalendarX className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">Canceladas</span>
-                            </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.cancelledAppointments || 0}</p>
-                            <p className="text-xs opacity-80">Canceladas</p>
-                        </div>
-
-                        {/* No-Show */}
-                        <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-4 rounded-xl shadow-sm text-white">
-                            <div className="flex items-center justify-between mb-2">
-                                <UserX className="w-5 h-5 opacity-80" />
-                                <span className="text-xs opacity-80">No Asistió</span>
-                            </div>
-                            <p className="text-2xl font-bold">{statistics.summary?.noShowAppointments || 0}</p>
-                            <p className="text-xs opacity-80">
-                                {statistics.cancellationRate || 0}% tasa
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Statistics Period Selector & Alerts */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 animate-fade-in-up" style={{ animationDelay: '0.15s' }}>
-                    {/* Period Selector */}
-                    <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                                <BarChart3 className="w-4 h-4 text-indigo-600" />
-                                Estadísticas
-                            </h3>
-                        </div>
-                        <div className="flex gap-2">
-                            {['week', 'month', 'quarter'].map(period => (
-                                <button
-                                    key={period}
-                                    onClick={() => setStatsPeriod(period)}
-                                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold transition-colors ${
-                                        statsPeriod === period
-                                            ? 'bg-indigo-600 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                                >
-                                    {period === 'week' ? 'Semana' : period === 'month' ? 'Mes' : 'Trimestre'}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Service Types Distribution */}
-                    <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                        <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                            <Wrench className="w-4 h-4 text-purple-600" />
-                            Por Tipo de Servicio
-                        </h3>
-                        <div className="space-y-2">
-                            {statistics.serviceTypes?.slice(0, 4).map((item, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">{item.serviceType}</span>
-                                    <span className="font-semibold text-gray-800">{item.count}</span>
+                            <div>
+                                <h3 className="font-black text-2xl text-slate-900 tracking-tight leading-none mb-1">Centro de Agenda</h3>
+                                <div className="flex items-center gap-2">
+                                    <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"></span>
+                                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">{totalItems} Citas en Registro</p>
                                 </div>
-                            ))}
-                            {(!statistics.serviceTypes || statistics.serviceTypes.length === 0) && (
-                                <p className="text-sm text-gray-400 text-center">Sin datos</p>
-                            )}
+                            </div>
                         </div>
-                    </div>
 
-                    {/* Technician Performance */}
-                    <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                        <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                            <User className="w-4 h-4 text-green-600" />
-                            Rendimiento Técnicos
-                        </h3>
-                        <div className="space-y-2">
-                            {statistics.technicianStats?.slice(0, 4).map((item, index) => (
-                                <div key={index} className="flex items-center justify-between">
-                                    <span className="text-sm text-gray-600">{item.technicianName || 'Sin nombre'}</span>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-xs text-gray-500">{item.completedCount || 0}/{item.appointmentCount || 0}</span>
-                                        <span className="font-semibold text-green-600 text-xs">
-                                            {item.appointmentCount > 0 
-                                                ? Math.round((item.completedCount || 0) / item.appointmentCount * 100)
-                                                : 0}%
-                                        </span>
-                                    </div>
-                                </div>
-                            ))}
-                            {(!statistics.technicianStats || statistics.technicianStats.length === 0) && (
-                                <p className="text-sm text-gray-400 text-center">Sin datos</p>
-                            )}
-                        </div>
-                    </div>
-                </div>
-
-                {/* Filter Bar */}
-                <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-                    <div className="flex flex-wrap gap-3 items-center">
-                        {/* Search */}
-                        <div className="flex-1 min-w-[200px]">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar cliente, teléfono, servicio..."
+                        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+                            <div className="relative flex-1 lg:w-64">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Buscar cliente o servicio..."
                                     value={searchTerm}
-                                    onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
-                                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-11 pr-4 py-3.5 bg-white border border-gray-100 rounded-2xl text-sm transition-all focus:ring-4 focus:ring-slate-100 focus:border-slate-300 outline-none"
                                 />
                             </div>
+                            
+                            <select 
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                                className="px-5 py-3.5 bg-white border border-gray-100 rounded-2xl text-xs font-bold uppercase tracking-widest transition-all outline-none appearance-none focus:ring-4 focus:ring-slate-100 min-w-[160px]"
+                            >
+                                <option value="">Todos los Estados</option>
+                                {Object.entries(APPOINTMENT_STATUS_CONFIG).map(([val, cfg]) => (
+                                    <option key={val} value={val}>{cfg.label.toUpperCase()}</option>
+                                ))}
+                            </select>
+
+                            {canModify && (
+                                <Button onClick={handleExport} variant="outline" className="h-12 flex-1 lg:flex-none bg-white border border-gray-200 rounded-2xl font-bold text-xs uppercase tracking-widest flex items-center gap-2 px-6 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700">
+                                    <Download className="w-4 h-4" /> Exportar
+                                </Button>
+                            )}
+                            {canModify && (
+                                <Button onClick={() => setShowForm(true)} className="h-12 flex-1 lg:flex-none bg-slate-900 rounded-2xl shadow-xl hover:bg-black font-bold text-xs uppercase tracking-widest flex items-center gap-2 px-6">
+                                    <Plus className="w-4 h-4 text-white" /> Programar Cita
+                                </Button>
+                            )}
                         </div>
-
-                        {/* Status Filter */}
-                        <select
-                            value={filterStatus}
-                            onChange={(e) => { setFilterStatus(e.target.value); setCurrentPage(1); }}
-                            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                        >
-                            <option value="">Todos los estados</option>
-                            {Object.entries(APPOINTMENT_STATUS_CONFIG).map(([value, config]) => (
-                                <option key={value} value={value}>{config.label}</option>
-                            ))}
-                        </select>
-
-                        {/* Service Type Filter */}
-                        <select
-                            value={filterServiceType}
-                            onChange={(e) => { setFilterServiceType(e.target.value); setCurrentPage(1); }}
-                            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                        >
-                            <option value="">Todos los servicios</option>
-                            {SERVICE_TYPES.map(s => (
-                                <option key={s.value} value={s.value}>{s.label}</option>
-                            ))}
-                        </select>
-
-                        {/* Technician Filter */}
-                        <select
-                            value={filterTechnician}
-                            onChange={(e) => { setFilterTechnician(e.target.value); setCurrentPage(1); }}
-                            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                        >
-                            <option value="">Todos los técnicos</option>
-                            {technicians.map(t => (
-                                <option key={t.id} value={t.id}>{t.name}</option>
-                            ))}
-                        </select>
-
-                        {/* Date Range */}
-                        <input
-                            type="date"
-                            value={dateRange.start}
-                            onChange={(e) => { setDateRange({ ...dateRange, start: e.target.value }); setCurrentPage(1); }}
-                            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                            placeholder="Desde"
-                        />
-                        <input
-                            type="date"
-                            value={dateRange.end}
-                            onChange={(e) => { setDateRange({ ...dateRange, end: e.target.value }); setCurrentPage(1); }}
-                            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500"
-                            placeholder="Hasta"
-                        />
-
-                        {/* Clear Filters */}
-                        <button
-                            onClick={clearFilters}
-                            className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                            title="Limpiar filtros"
-                        >
-                            <X className="w-4 h-4" />
-                        </button>
-
-                        <span className="text-sm text-gray-500 font-medium">
-                            {totalItems} cita{totalItems !== 1 ? 's' : ''}
-                        </span>
                     </div>
-                </div>
 
-                {/* Appointments Table */}
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden animate-fade-in-up" style={{ animationDelay: '0.3s' }}>
-                    <div className="overflow-x-auto">
-                        <table className="w-full">
-                            <thead className="bg-gray-50 border-b border-gray-100">
-                                <tr>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Fecha/Hora</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Cliente</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Servicio</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Técnico</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Estado</th>
-                                    <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Notas</th>
-                                    <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">Acciones</th>
+                    {/* Industrial Ledger Table */}
+                    <div className="overflow-x-auto p-2">
+                        <table className="w-full text-left border-separate border-spacing-0">
+                            <thead>
+                                <tr className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] bg-slate-50/50">
+                                    <th className="p-6">Cronograma</th>
+                                    <th className="p-6">Identidad Cliente</th>
+                                    <th className="p-6">Servicio & Técnico</th>
+                                    <th className="p-6">Estado Operativo</th>
+                                    <th className="p-6 text-right">Acciones</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {loading ? (
-                                    <tr>
-                                        <td colSpan="7" className="px-4 py-12 text-center">
-                                            <RefreshCw className="w-6 h-6 animate-spin mx-auto text-indigo-600" />
-                                            <p className="text-gray-500 mt-2">Cargando citas...</p>
-                                        </td>
-                                    </tr>
-                                ) : appointments.length === 0 ? (
-                                    <tr>
-                                        <td colSpan="7" className="px-4 py-12 text-center">
-                                            <Calendar className="w-12 h-12 mx-auto text-gray-300" />
-                                            <p className="text-gray-500 mt-2">No se encontraron citas</p>
-                                            <p className="text-sm text-gray-400">Ajusta los filtros o crea una nueva cita</p>
-                                        </td>
-                                    </tr>
-                                ) : (
-                                    appointments.map((appointment) => {
+                            <tbody className="divide-y divide-gray-50/50">
+                                <AnimatePresence mode="popLayout">
+                                    {loading ? (
+                                        <tr>
+                                            <td colSpan="5" className="p-20 text-center">
+                                                <div className="flex flex-col items-center gap-4">
+                                                    <div className="w-12 h-12 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                                                    <p className="text-xs font-black text-slate-400 uppercase tracking-widest">Sincronizando Agenda...</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : appointments.length === 0 ? (
+                                        <tr>
+                                            <td colSpan="5" className="p-20 text-center">
+                                                <div className="flex flex-col items-center gap-4 opacity-30">
+                                                    <CalendarX className="w-16 h-16 text-slate-300" />
+                                                    <p className="text-xs font-black uppercase tracking-widest">No se encontraron bloques asignados</p>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ) : appointments.map((appointment, idx) => {
                                         const { date, time } = formatDateTime(appointment.scheduledDate);
-                                        const availableTransitions = getAvailableTransitions(appointment.status);
-                                        
+                                        const transitions = STATUS_TRANSITIONS[appointment.status] || [];
                                         return (
-                                            <tr key={appointment.id} className="hover:bg-gray-50 transition-colors">
-                                                <td className="px-4 py-3">
-                                                    <div>
-                                                        <p className="font-medium text-gray-900 text-sm">{date}</p>
-                                                        <p className="text-xs text-gray-500 flex items-center gap-1">
-                                                            <Clock className="w-3 h-3" /> {time}
-                                                        </p>
+                                            <motion.tr 
+                                                key={appointment.id}
+                                                initial={{ opacity: 0, x: -10 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{ delay: idx * 0.03 }}
+                                                className="hover:bg-slate-50/50 transition-all group"
+                                            >
+                                                <td className="p-6">
+                                                    <div className="space-y-1">
+                                                        <p className="font-black text-slate-900 tracking-tight group-hover:text-indigo-600 transition-colors">{date}</p>
+                                                        <div className="flex items-center gap-2 text-slate-400">
+                                                            <Clock className="w-3 h-3" />
+                                                            <span className="text-[10px] font-bold uppercase tracking-tighter">{time}</span>
+                                                            <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-black">{appointment.duration}min</span>
+                                                        </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3">
-                                                    <div>
-                                                        <p className="font-medium text-gray-900 text-sm">{appointment.customerName || 'Cliente no encontrado'}</p>
-                                                        {appointment.customerPhone && (
-                                                            <p className="text-xs text-gray-500 flex items-center gap-1">
-                                                                <Phone className="w-3 h-3" /> {appointment.customerPhone}
+                                                <td className="p-6">
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="w-12 h-12 bg-white border border-gray-100 rounded-2xl flex items-center justify-center shadow-sm">
+                                                            <User className="w-5 h-5 text-slate-400" />
+                                                        </div>
+                                                        <div className="space-y-0.5">
+                                                            <p className="font-black text-slate-900 leading-tight">{appointment.customerName}</p>
+                                                            <p className="text-[10px] font-bold text-slate-400 uppercase flex items-center gap-1">
+                                                                <Phone className="w-2.5 h-2.5" /> {appointment.customerPhone || 'N/A'}
                                                             </p>
-                                                        )}
+                                                        </div>
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3">
-                                                    {getServiceBadge(appointment.serviceType)}
+                                                <td className="p-6">
+                                                    <div className="space-y-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <Wrench className="w-3.5 h-3.5 text-indigo-500" />
+                                                            <span className="text-[11px] font-black text-slate-700 uppercase tracking-tight">{appointment.serviceType}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-1.5 text-slate-400">
+                                                            <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full"></div>
+                                                            <span className="text-[10px] font-bold uppercase tracking-tighter italic">{appointment.technicianName || 'Mesa Técnica'}</span>
+                                                        </div>
+                                                    </div>
                                                 </td>
-                                                <td className="px-4 py-3 text-sm text-gray-600">
-                                                    {appointment.technicianName || (
-                                                        <span className="text-gray-400 italic">Sin asignar</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-2">
-                                                        {getStatusBadge(appointment.status)}
-                                                        {/* Quick status actions */}
-                                                        {availableTransitions.length > 0 && (
-                                                            <div className="relative group">
-                                                                <button className="p-1 hover:bg-gray-100 rounded transition-colors">
-                                                                    <ChevronRight className="w-3 h-3 text-gray-400" />
-                                                                </button>
-                                                                <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 hidden group-hover:block min-w-[140px]">
-                                                                    {availableTransitions.map(newStatus => (
-                                                                        <button
-                                                                            key={newStatus}
-                                                                            onClick={() => handleStatusChange(appointment.id, newStatus)}
-                                                                            className={`w-full px-3 py-1.5 text-left text-xs hover:bg-gray-50 flex items-center gap-2 ${
-                                                                                newStatus === 'No-Show' ? 'text-orange-600' :
-                                                                                newStatus === 'Completed' ? 'text-green-600' :
-                                                                                newStatus === 'Cancelled' ? 'text-red-600' :
-                                                                                'text-blue-600'
-                                                                            }`}
-                                                                        >
-                                                                            {newStatus === 'Completed' && <Check className="w-3 h-3" />}
-                                                                            {newStatus === 'Cancelled' && <XCircle className="w-3 h-3" />}
-                                                                            {newStatus === 'No-Show' && <UserX className="w-3 h-3" />}
-                                                                            {newStatus === 'Confirmed' && <CheckCircle className="w-3 h-3" />}
-                                                                            {APPOINTMENT_STATUS_CONFIG[newStatus]?.label || newStatus}
-                                                                        </button>
-                                                                    ))}
-                                                                </div>
+                                                <td className="p-6">
+                                                    <div className="flex flex-col gap-2">
+                                                        <div className={`w-fit px-3 py-1 rounded-lg border text-[9px] font-black uppercase tracking-widest ${getStatusStyle(appointment.status)}`}>
+                                                            {appointment.status}
+                                                        </div>
+                                                        {transitions.length > 0 && (
+                                                            <div className="flex gap-1">
+                                                                 {transitions.slice(0, 2).map(next => (
+                                                                    <button
+                                                                        key={next}
+                                                                        onClick={() => handleStatusChange(appointment.id, next)}
+                                                                        className="p-1 text-slate-300 hover:text-indigo-600 transition-colors"
+                                                                        title={`Mover a ${next}`}
+                                                                    >
+                                                                        <ArrowRight className="w-3 h-3" />
+                                                                    </button>
+                                                                ))}
                                                             </div>
                                                         )}
                                                     </div>
                                                 </td>
-                                                <td className="px-4 py-3">
-                                                    {appointment.notes ? (
-                                                        <p className="text-xs text-gray-500 max-w-[150px] truncate" title={appointment.notes}>
-                                                            {appointment.notes}
-                                                        </p>
-                                                    ) : (
-                                                        <span className="text-xs text-gray-300">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3 text-right">
-                                                    <div className="flex justify-end gap-1">
-                                                        <button
+                                                <td className="p-6 text-right">
+                                                    <div className="flex justify-end gap-2">
+                                                        <motion.button
+                                                            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
                                                             onClick={() => setShowDetail(appointment)}
-                                                            className="p-1.5 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                                                            title="Ver detalles"
+                                                            className="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-gray-100 text-slate-400 hover:bg-slate-900 hover:text-white transition-all shadow-sm"
                                                         >
                                                             <Eye className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleEdit(appointment)}
-                                                            className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                                            title="Editar"
-                                                        >
-                                                            <Edit2 className="w-4 h-4" />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => handleDelete(appointment.id)}
-                                                            className="p-1.5 text-gray-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                                            title="Eliminar"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
+                                                        </motion.button>
+                                                        {canModify && (
+                                                            <motion.button
+                                                                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                                onClick={() => handleEdit(appointment)}
+                                                                className="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-gray-100 text-slate-400 hover:bg-indigo-600 hover:text-white transition-all shadow-sm"
+                                                            >
+                                                                <Edit2 className="w-4 h-4" />
+                                                            </motion.button>
+                                                        )}
+                                                        {isAdmin && (
+                                                            <motion.button
+                                                                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+                                                                onClick={() => handleDelete(appointment.id)}
+                                                                className="w-10 h-10 rounded-xl flex items-center justify-center bg-white border border-gray-100 text-slate-400 hover:bg-red-500 hover:text-white transition-all shadow-sm"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </motion.button>
+                                                        )}
                                                     </div>
                                                 </td>
-                                            </tr>
+                                            </motion.tr>
                                         );
-                                    })
-                                )}
+                                    })}
+                                </AnimatePresence>
                             </tbody>
                         </table>
                     </div>
 
                     {/* Pagination */}
                     {totalPages > 1 && (
-                        <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between bg-gray-50">
-                            <p className="text-sm text-gray-600">
-                                Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} de {totalItems}
-                            </p>
-                            <div className="flex items-center gap-1">
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        <div className="p-8 border-t border-gray-100 bg-gray-50/30 flex justify-between items-center">
+                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Página {currentPage} de {totalPages}</p>
+                            <div className="flex gap-2">
+                                <button 
                                     disabled={currentPage === 1}
-                                    className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => setCurrentPage(p => p - 1)}
+                                    className="p-3 bg-white border border-gray-100 rounded-xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
                                     <ChevronLeft className="w-4 h-4" />
                                 </button>
-                                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                    let pageNum;
-                                    if (totalPages <= 5) {
-                                        pageNum = i + 1;
-                                    } else if (currentPage <= 3) {
-                                        pageNum = i + 1;
-                                    } else if (currentPage >= totalPages - 2) {
-                                        pageNum = totalPages - 4 + i;
-                                    } else {
-                                        pageNum = currentPage - 2 + i;
-                                    }
-                                    return (
-                                        <button
-                                            key={pageNum}
-                                            onClick={() => setCurrentPage(pageNum)}
-                                            className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors ${
-                                                currentPage === pageNum
-                                                    ? 'bg-indigo-600 text-white'
-                                                    : 'hover:bg-gray-200 text-gray-600'
-                                            }`}
-                                        >
-                                            {pageNum}
-                                        </button>
-                                    );
-                                })}
-                                <button
-                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                <button 
                                     disabled={currentPage === totalPages}
-                                    className="p-2 rounded-lg hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                                    onClick={() => setCurrentPage(p => p + 1)}
+                                    className="p-3 bg-white border border-gray-100 rounded-xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
                                     <ChevronRight className="w-4 h-4" />
                                 </button>
@@ -736,278 +581,218 @@ const AdminAppointments = () => {
                         </div>
                     )}
                 </div>
-
-                {/* Upcoming Appointments Alert */}
-                {statistics?.upcoming && statistics.upcoming.length > 0 && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
-                        <h3 className="font-semibold text-blue-800 mb-3 flex items-center gap-2">
-                            <CalendarCheck className="w-4 h-4" />
-                            Próximas 7 días ({statistics.upcoming.length} citas)
-                        </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {statistics.upcoming.slice(0, 6).map((apt) => {
-                                const { date, time } = formatDateTime(apt.scheduledDate);
-                                return (
-                                    <div key={apt.id} className="bg-white p-3 rounded-lg border border-blue-100">
-                                        <div className="flex justify-between items-start">
-                                            <div>
-                                                <p className="font-medium text-sm text-gray-900">{apt.customerName}</p>
-                                                <p className="text-xs text-gray-500">{apt.serviceType}</p>
-                                            </div>
-                                            {getStatusBadge(apt.status)}
-                                        </div>
-                                        <p className="text-xs text-blue-600 mt-2 flex items-center gap-1">
-                                            <Clock className="w-3 h-3" /> {date} • {time}
-                                        </p>
-                                        {apt.technicianName && (
-                                            <p className="text-xs text-gray-500 mt-1">{apt.technicianName}</p>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
-
             </div>
 
-            {/* Form Modal */}
-            {showForm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
-                            <h3 className="font-bold text-xl flex items-center gap-2">
-                                <Calendar className="w-5 h-5 text-indigo-600" />
-                                {editingAppointment ? 'Editar Cita' : 'Nueva Cita'}
-                            </h3>
-                            <button onClick={() => { setShowForm(false); setEditingAppointment(null); resetForm(); }} className="text-gray-400 hover:text-gray-600 transition-colors">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <form onSubmit={handleSubmit} className="p-6 grid grid-cols-2 gap-4">
-                            {/* Customer */}
-                            <div className="col-span-2">
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">
-                                    Cliente * <span className="text-gray-400 font-normal">(requerido)</span>
-                                </label>
-                                <select
-                                    required
-                                    value={formData.customerId}
-                                    onChange={e => setFormData({ ...formData, customerId: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                >
-                                    <option value="">Seleccionar cliente</option>
-                                    {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                </select>
-                            </div>
-
-                            {/* Service Type */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Tipo de Servicio *</label>
-                                <select
-                                    required
-                                    value={formData.serviceType}
-                                    onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                >
-                                    <option value="">Seleccionar servicio</option>
-                                    {SERVICE_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                                </select>
-                            </div>
-
-                            {/* Technician */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Técnico Asignado</label>
-                                <select
-                                    value={formData.technicianId}
-                                    onChange={e => setFormData({ ...formData, technicianId: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                >
-                                    <option value="">Sin asignar</option>
-                                    {technicians.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                                </select>
-                            </div>
-
-                            {/* Date & Time */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Fecha y Hora *</label>
-                                <input
-                                    required
-                                    type="datetime-local"
-                                    value={formData.scheduledDate}
-                                    onChange={e => setFormData({ ...formData, scheduledDate: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            {/* Duration */}
-                            <div>
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Duración (minutos)</label>
-                                <input
-                                    type="number"
-                                    min="15"
-                                    max="480"
-                                    step="15"
-                                    value={formData.duration}
-                                    onChange={e => setFormData({ ...formData, duration: parseInt(e.target.value) || 60 })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                />
-                            </div>
-
-                            {/* Status (only for editing) */}
-                            {editingAppointment && (
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Estado</label>
-                                    <select
-                                        value={formData.status}
-                                        onChange={e => setFormData({ ...formData, status: e.target.value })}
-                                        className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                    >
-                                        {Object.entries(APPOINTMENT_STATUS_CONFIG).map(([value, config]) => (
-                                            <option key={value} value={value}>{config.label}</option>
-                                        ))}
-                                    </select>
+            {/* Industrial Form Modal */}
+            <PortalWrapper isOpen={showForm}>
+                {showForm && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowForm(false)}
+                            className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="bg-white rounded-[2.5rem] w-full max-w-xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+                        >
+                            <div className="p-8 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                                <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 bg-slate-900 rounded-2xl flex items-center justify-center">
+                                        <Calendar className="w-6 h-6 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-black text-xl text-slate-900 tracking-tight leading-none mb-1">
+                                            {editingAppointment ? 'Modificar Registro' : 'Nueva Programación'}
+                                        </h3>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Protocolo de Agenda Operativa</p>
+                                    </div>
                                 </div>
-                            )}
-
-                            {/* Notes */}
-                            <div className="col-span-2">
-                                <label className="block text-sm font-semibold text-gray-700 mb-1">Notas</label>
-                                <textarea
-                                    value={formData.notes}
-                                    onChange={e => setFormData({ ...formData, notes: e.target.value })}
-                                    className="w-full p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                    rows="3"
-                                    placeholder="Detalles del servicio, instrucciones especiales..."
-                                ></textarea>
+                                <button onClick={() => setShowForm(false)} className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 rounded-xl transition-all"><X className="w-5 h-5 text-slate-400" /></button>
                             </div>
 
-                            {/* Actions */}
-                            <div className="col-span-2 flex justify-end gap-3 mt-4 pt-4 border-t border-gray-100">
-                                <Button type="button" variant="outline" onClick={() => { setShowForm(false); setEditingAppointment(null); resetForm(); }}>
-                                    Cancelar
-                                </Button>
-                                <Button type="submit" variant="primary" disabled={loading}>
-                                    {loading ? 'Guardando...' : (editingAppointment ? 'Actualizar Cita' : 'Crear Cita')}
-                                </Button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
-
-            {/* Detail Modal */}
-            {showDetail && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fade-in">
-                    <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-                        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-indigo-50 to-white">
-                            <h3 className="font-bold text-xl flex items-center gap-2">
-                                <Eye className="w-5 h-5 text-indigo-600" />
-                                Detalles de la Cita
-                            </h3>
-                            <button onClick={() => setShowDetail(null)} className="text-gray-400 hover:text-gray-600 transition-colors">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        <div className="p-6 space-y-4">
-                            {/* Status */}
-                            <div className="flex justify-between items-center">
-                                <span className="text-sm text-gray-500">Estado</span>
-                                {getStatusBadge(showDetail.status)}
-                            </div>
-
-                            {/* Customer */}
-                            <div className="border-b border-gray-100 pb-4">
-                                <h4 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                                    <User className="w-4 h-4 text-indigo-600" /> Cliente
-                                </h4>
-                                <p className="font-medium">{showDetail.customerName || 'No encontrado'}</p>
-                                {showDetail.customerEmail && (
-                                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                                        <Mail className="w-3 h-3" /> {showDetail.customerEmail}
-                                    </p>
-                                )}
-                                {showDetail.customerPhone && (
-                                    <p className="text-sm text-gray-500 flex items-center gap-1">
-                                        <Phone className="w-3 h-3" /> {showDetail.customerPhone}
-                                    </p>
-                                )}
-                            </div>
-
-                            {/* Service Details */}
-                            <div className="border-b border-gray-100 pb-4">
-                                <h4 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                                    <Wrench className="w-4 h-4 text-purple-600" /> Servicio
-                                </h4>
-                                <div className="mb-2">{getServiceBadge(showDetail.serviceType)}</div>
-                                <p className="text-sm text-gray-500 flex items-center gap-1">
-                                    <Clock className="w-3 h-3" /> Duración: {showDetail.duration || 60} minutos
-                                </p>
-                            </div>
-
-                            {/* Schedule */}
-                            <div className="border-b border-gray-100 pb-4">
-                                <h4 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                                    <Calendar className="w-4 h-4 text-blue-600" /> Programación
-                                </h4>
-                                <p className="text-sm">
-                                    {new Date(showDetail.scheduledDate).toLocaleDateString('es-ES', { 
-                                        weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' 
-                                    })}
-                                </p>
-                                <p className="text-sm text-gray-500">
-                                    {new Date(showDetail.scheduledDate).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                                </p>
-                            </div>
-
-                            {/* Technician */}
-                            {showDetail.technicianName && (
-                                <div className="border-b border-gray-100 pb-4">
-                                    <h4 className="font-semibold text-gray-800 mb-2 flex items-center gap-2">
-                                        <User className="w-4 h-4 text-green-600" /> Técnico
-                                    </h4>
-                                    <p className="text-sm">{showDetail.technicianName}</p>
-                                </div>
-                            )}
-
-                            {/* Notes */}
-                            {showDetail.notes && (
-                                <div className="pb-4">
-                                    <h4 className="font-semibold text-gray-800 mb-2">Notas</h4>
-                                    <p className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">{showDetail.notes}</p>
-                                </div>
-                            )}
-
-                            {/* Actions */}
-                            <div className="flex justify-between items-center pt-4 border-t border-gray-100">
-                                <Button
-                                    variant="outline"
-                                    onClick={() => { setShowDetail(null); handleEdit(showDetail); }}
-                                    className="flex items-center gap-2"
-                                >
-                                    <Edit2 className="w-4 h-4" /> Editar
-                                </Button>
-                                <div className="flex gap-2">
-                                    {getAvailableTransitions(showDetail.status).map(newStatus => (
-                                        <Button
-                                            key={newStatus}
-                                            onClick={async () => {
-                                                await handleStatusChange(showDetail.id, newStatus);
-                                                setShowDetail(null);
-                                            }}
-                                            variant={newStatus === 'Completed' ? 'primary' : 'outline'}
-                                            className="text-xs"
+                            <form onSubmit={handleSubmit} className="p-8 overflow-y-auto custom-scrollbar space-y-6">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cliente Firmante</label>
+                                        <select
+                                            required
+                                            value={formData.customerId}
+                                            onChange={e => setFormData({ ...formData, customerId: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 outline-none transition-all"
                                         >
-                                            {APPOINTMENT_STATUS_CONFIG[newStatus]?.label || newStatus}
-                                        </Button>
-                                    ))}
+                                            <option value="">Seleccionar Cliente</option>
+                                            {customers.map(c => (
+                                                <option key={c.id} value={c.id}>{c.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Técnico Asignado</label>
+                                        <select
+                                            value={formData.technicianId}
+                                            onChange={e => setFormData({ ...formData, technicianId: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 outline-none transition-all"
+                                        >
+                                            <option value="">Cualquier Especialista</option>
+                                            {technicians.map(t => (
+                                                <option key={t.id} value={t.id}>{t.name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Tipo de Servicio</label>
+                                        <select
+                                            required
+                                            value={formData.serviceType}
+                                            onChange={e => setFormData({ ...formData, serviceType: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 outline-none transition-all"
+                                        >
+                                            <option value="">Seleccionar Servicio</option>
+                                            {SERVICE_TYPES.map(s => (
+                                                <option key={s.value} value={s.value}>{s.label}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Cronograma (Fecha/Hora)</label>
+                                        <input
+                                            required
+                                            type="datetime-local"
+                                            value={formData.scheduledDate}
+                                            onChange={e => setFormData({ ...formData, scheduledDate: e.target.value })}
+                                            className="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 outline-none transition-all"
+                                        />
+                                    </div>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Instrucciones Operativas / Notas</label>
+                                    <textarea
+                                        value={formData.notes}
+                                        onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                                        rows={3}
+                                        className="w-full p-4 bg-slate-50 border-none rounded-2xl text-sm font-bold focus:ring-4 focus:ring-indigo-50 outline-none transition-all resize-none"
+                                        placeholder="Detalles adicionales del requerimiento..."
+                                    />
+                                </div>
+
+                                <div className="pt-4 flex gap-3">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setShowForm(false)}
+                                        className="flex-1 py-4 bg-slate-100 text-slate-500 rounded-2xl font-black text-xs uppercase tracking-[0.2em] hover:bg-slate-200 transition-all"
+                                    >
+                                        Abortar
+                                    </button>
+                                    <button 
+                                        type="submit"
+                                        className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-slate-200 hover:bg-black transition-all"
+                                    >
+                                        {editingAppointment ? 'Actualizar Registro' : 'Confirmar Agenda'}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </PortalWrapper>
+
+            {/* Industrial Detail Modal */}
+            <PortalWrapper isOpen={showDetail}>
+                {showDetail && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowDetail(null)}
+                            className="absolute inset-0 bg-slate-900/40 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                            className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden relative z-10"
+                        >
+                            <div className="p-8 bg-slate-900 text-white relative">
+                                <div className="absolute top-0 right-0 p-8 opacity-10">
+                                    <Activity className="w-32 h-32" />
+                                </div>
+                                <div className="flex justify-between items-start relative z-10">
+                                    <div className="space-y-4">
+                                        <div className={`w-fit px-3 py-1 rounded-lg border border-white/20 text-[9px] font-black uppercase tracking-widest ${getStatusStyle(showDetail.status)} bg-white/10`}>
+                                            {showDetail.status}
+                                        </div>
+                                        <div>
+                                            <h3 className="text-3xl font-black tracking-tighter leading-tight">{showDetail.customerName}</h3>
+                                            <p className="text-white/40 text-[10px] font-black uppercase tracking-[0.2em]">{showDetail.serviceType} • ID-{showDetail.id}</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowDetail(null)} className="w-10 h-10 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-xl transition-all"><X className="w-5 h-5 text-white" /></button>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+                            
+                            <div className="p-8 space-y-8">
+                                <div className="grid grid-cols-2 gap-8">
+                                    <div className="space-y-1">
+                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Cronograma</p>
+                                        <p className="font-black text-slate-900 text-lg">{formatDateTime(showDetail.scheduledDate).date}</p>
+                                        <p className="text-sm font-bold text-slate-500">{formatDateTime(showDetail.scheduledDate).time}</p>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Asignación</p>
+                                        <p className="font-black text-slate-900 text-lg">{showDetail.technicianName || 'Mesa Técnica'}</p>
+                                        <p className="text-sm font-bold text-slate-500">{showDetail.duration} Minutos</p>
+                                    </div>
+                                </div>
 
+                                <div className="p-6 bg-slate-50 rounded-3xl space-y-4">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                                            <Phone className="w-4 h-4 text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Contacto</p>
+                                            <p className="font-black text-slate-900">{showDetail.customerPhone || 'N/A'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 bg-white rounded-2xl flex items-center justify-center shadow-sm">
+                                            <Mail className="w-4 h-4 text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Canal Digital</p>
+                                            <p className="font-black text-slate-900">{showDetail.customerEmail || 'Sin correo'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {showDetail.notes && (
+                                    <div className="space-y-2">
+                                        <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest">Bitácora Operativa</p>
+                                        <p className="text-sm font-bold text-slate-700 leading-relaxed italic border-l-4 border-slate-900 pl-4 bg-slate-50 py-4 rounded-r-2xl">
+                                            "{showDetail.notes}"
+                                        </p>
+                                    </div>
+                                )}
+
+                                <div className="flex gap-3 pt-4">
+                                    <button 
+                                        onClick={() => { handleEdit(showDetail); setShowDetail(null); }}
+                                        className="flex-1 py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl shadow-slate-200 hover:bg-black transition-all"
+                                    >
+                                        Editar Registro
+                                    </button>
+                                </div>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </PortalWrapper>
         </AdminLayout>
     );
 };

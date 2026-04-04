@@ -15,21 +15,23 @@ const Home = () => {
 
     const featuredProducts = products.filter(p => p.featured).slice(0, 8);
 
+    const jsonLd = React.useMemo(() => ({
+        '@context': 'https://schema.org',
+        '@type': 'Store',
+        name: 'La Bodega del Computador',
+        description: 'Tienda especializada en portátiles, componentes, impresoras, mobiliario y gaming.',
+        url: 'https://labodegadelcomputador.com',
+        priceRange: '$$',
+        areaServed: 'CO',
+        currenciesAccepted: 'COP',
+        paymentAccepted: 'Cash, Credit Card',
+    }), []);
+
     useSEO({
         title: 'Portátiles, Componentes y Tecnología',
         description: 'La Bodega del Computador: los mejores precios en laptops, componentes PC, impresoras, mobiliario de oficina y zona gaming. Envío gratis y garantía oficial.',
         canonical: 'https://labodegadelcomputador.com/',
-        jsonLd: {
-            '@context': 'https://schema.org',
-            '@type': 'Store',
-            name: 'La Bodega del Computador',
-            description: 'Tienda especializada en portátiles, componentes, impresoras, mobiliario y gaming.',
-            url: 'https://labodegadelcomputador.com',
-            priceRange: '$$',
-            areaServed: 'CO',
-            currenciesAccepted: 'COP',
-            paymentAccepted: 'Cash, Credit Card',
-        },
+        jsonLd
     });
 
     return (

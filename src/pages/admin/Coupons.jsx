@@ -14,6 +14,7 @@ import {
 import Button from '../../components/Button';
 import { useShop } from '../../context/ShopContext';
 import { useModal } from '../../context/ModalContext';
+import * as XLSX from 'xlsx';
 
 const AdminCoupons = () => {
     const { formatPrice } = useShop();
@@ -87,7 +88,7 @@ const AdminCoupons = () => {
             if (dateRange.end) params.endDate = dateRange.end;
 
             const data = await couponService.getCoupons(params);
-            setCoupons(data.coupons || []);
+            setCoupons(data.items || data.coupons || []);
             if (data.pagination) {
                 setTotalPages(data.pagination.totalPages);
                 setTotalItems(data.pagination.total);
@@ -223,18 +224,32 @@ const AdminCoupons = () => {
 
     const handleExport = async () => {
         try {
-            const params = {};
-            if (filterStatus) params.status = filterStatus;
-            if (filterType) params.type = filterType;
+            setLoading(true);
+            const token = localStorage.getItem('adminToken');
+            const response = await fetch(buildApiUrl(`/api/coupons/export?format=json&token=${token}`));
+            
+            if (!response.ok) throw new Error('Error al obtener datos de exportación');
+            
+            const allCoupons = await response.json();
+            
+            const dataToExport = allCoupons.map(coupon => ({
+                ID: coupon.id,
+                Codigo: coupon.code,
+                Tipo: coupon.type === 'percent' ? 'Porcentaje' : 'Monto Fijo',
+                Descuento: coupon.discount,
+                Min_Compra: coupon.minPurchase || 0,
+                Expira: coupon.expiresAt || 'Nunca',
+                Estado: coupon.status,
+                Usos: coupon.uses || 0,
+                Max_Usos: coupon.maxUses || 'Ilimitado'
+            }));
 
-            const csvContent = await couponService.exportCoupons(params);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `cupones_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
+            const ws = XLSX.utils.json_to_sheet(dataToExport);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Cupones');
+            XLSX.writeFile(wb, `cupones_lbdc_${new Date().toISOString().split('T')[0]}.xlsx`);
         } catch (error) {
-            showAlert({ title: 'Error', message: 'Error al exportar', type: 'error' });
+            showAlert({ title: 'Error', message: 'Error al exportar cupones', type: 'error' });
         }
     };
 
@@ -309,7 +324,7 @@ const AdminCoupons = () => {
                     <p className="text-gray-500">Gestión de cupones de descuento y códigos promocionales.</p>
                     <div className="flex gap-2">
                         <Button onClick={handleExport} variant="outline" className="flex items-center gap-2">
-                            <Download className="w-4 h-4" /> Exportar CSV
+                            <Download className="w-4 h-4" /> Exportar Excel
                         </Button>
                         <Button onClick={() => handleOpenForm()} className="flex items-center gap-2">
                             <Plus className="w-4 h-4" /> Nuevo Cupón

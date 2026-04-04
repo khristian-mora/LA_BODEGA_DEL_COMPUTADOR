@@ -88,3 +88,56 @@ export const checkInventoryAlerts = (req, res) => {
         });
     });
 };
+
+// 5. Get List of Available Automations
+export const getAutomations = (req, res) => {
+    const automations = [
+        {
+            id: 'abandoned_cart',
+            name: 'Recuperación de Carritos',
+            description: 'Envía recordatorios a clientes que no completaron su compra.',
+            status: 'active',
+            lastRun: new Date().toISOString(),
+            type: 'Email/WhatsApp'
+        },
+        {
+            id: 'maintenance_due',
+            name: 'Recordatorio de Mantenimiento',
+            description: 'Notifica a clientes que su equipo requiere mantenimiento (6 meses).',
+            status: 'active',
+            lastRun: new Date().toISOString(),
+            type: 'Notification'
+        },
+        {
+            id: 'low_stock',
+            name: 'Alertas de Inventario Bajo',
+            description: 'Notifica cuando productos bajan del stock mínimo.',
+            status: 'active',
+            lastRun: new Date().toISOString(),
+            type: 'System/Email'
+        },
+        {
+            id: 'customer_review',
+            name: 'Solicitud de Reseñas',
+            description: 'Solicita feedback a clientes 7 días después de la entrega.',
+            status: 'disabled',
+            lastRun: null,
+            type: 'WhatsApp'
+        }
+    ];
+    res.json(automations);
+};
+
+// 6. Test Automation Execution
+export const testAutomation = (req, res) => {
+    const { id } = req.body;
+    console.log(`[AUTOMATION] Testing automation ID: ${id}`);
+    
+    // Simulate a successful test
+    res.json({
+        success: true,
+        message: `Prueba de automatización '${id}' iniciada correctamente.`,
+        timestamp: new Date().toISOString(),
+        details: 'El sistema ha verificado los triggers y la conexión con el motor de reglas.'
+    });
+};

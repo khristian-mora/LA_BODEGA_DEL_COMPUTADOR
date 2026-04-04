@@ -1,4 +1,6 @@
-const API_URL = '/api/settings';
+import { buildApiUrl } from '../config/config';
+
+const API_URL = buildApiUrl('/api/settings');
 
 const getHeaders = () => {
     const token = localStorage.getItem('adminToken');
@@ -72,38 +74,36 @@ export const settingsService = {
                 return merged;
             }
         } catch (error) {
-            // Solo mostrar warning, no error - es comportamiento esperado sin token
-            console.warn('Settings API no disponible, usando configuración local');
+            // Silencioso por defecto, es comportamiento esperado sin conexión o token
         }
         
         return { ...getLocalSettings() };
     },
 
     updateSettings: async (newSettings) => {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('adminToken');
         
         // Always save locally as backup
         const localUpdated = saveLocalSettings(newSettings);
         
         if (!token) {
+            console.warn('No admin token found, saving only to local storage');
             return { ...localUpdated };
         }
 
         try {
-            // Convert object to array of {key, value} pairs
-            const settingsArray = Object.entries(newSettings).map(([key, value]) => ({
-                key,
-                value: typeof value === 'object' ? JSON.stringify(value) : String(value)
-            }));
-
+            // Send settings as a flat object { key: value }
             const response = await fetch(API_URL, {
-                method: 'PUT',
+                method: 'POST',
                 headers: getHeaders(),
-                body: JSON.stringify(settingsArray)
+                body: JSON.stringify(newSettings)
             });
 
             if (response.ok) {
                 return { ...localUpdated };
+            } else {
+                const error = await response.json();
+                console.error('API Error updating settings:', error);
             }
         } catch (error) {
             console.error('Error saving settings to API, saved locally:', error);
@@ -116,10 +116,11 @@ export const settingsService = {
         if (!file) throw new Error('No se seleccionó archivo');
         if (file.size > 5 * 1024 * 1024) throw new Error('El archivo no puede superar 5MB');
 
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('adminToken');
         
         if (!token) {
             // Fallback to local storage with base64
+            console.warn('No admin token found, using base64 local fallback');
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -155,10 +156,11 @@ export const settingsService = {
         if (!file) throw new Error('No se seleccionó archivo');
         if (file.size > 5 * 1024 * 1024) throw new Error('El archivo no puede superar 5MB');
 
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('adminToken');
         
         if (!token) {
             // Fallback to local storage with base64
+            console.warn('No admin token found, using base64 local fallback');
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = () => {
@@ -201,7 +203,7 @@ export const settingsService = {
         const token = localStorage.getItem('adminToken');
         if (!token) throw new Error('No autorizado. Debes ser administrador parea descargar la base de datos.');
 
-        const response = await fetch('/api/admin/backup-db', {
+        const response = await fetch(buildApiUrl('/api/admin/backup-db'), {
             headers: {
                 'Authorization': `Bearer ${token}`
             }

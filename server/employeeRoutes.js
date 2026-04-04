@@ -111,18 +111,30 @@ export const deleteEmployee = (req, res) => {
 };
 
 // Calculate comprehensive payroll
+// Calculate comprehensive payroll (Colombian Law)
 export const calculatePayroll = (req, res) => {
-    const { month, year } = req.query;
+    const { month, year, department, role } = req.query;
     
     // Default to current month if not specified
     const targetMonth = month || new Date().getMonth() + 1;
     const targetYear = year || new Date().getFullYear();
     
-    // Get active employees
-    db.all("SELECT * FROM employees WHERE status = 'Active'", [], (err, employees) => {
+    // Get active employees with requested roles
+    let employeeSql = "SELECT * FROM employees WHERE status = 'Active'";
+    let employeeParams = [];
+
+    // Filter by roles requested: tecnico, administrador
+    employeeSql += " AND (role LIKE '%tecnico%' OR role LIKE '%administrador%' OR role LIKE '%admin%')";
+
+    if (department) {
+        employeeSql += " AND department = ?";
+        employeeParams.push(department);
+    }
+    
+    db.all(employeeSql, employeeParams, (err, employees) => {
         if (err) return res.status(500).json({ error: err.message });
         
-        // Get attendance for the month
+        // Get attendance for the month with all surcharge types
         const startDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-01`;
         const endDate = `${targetYear}-${String(targetMonth).padStart(2, '0')}-31`;
         
@@ -130,9 +142,10 @@ export const calculatePayroll = (req, res) => {
             SELECT employeeId, 
                    COUNT(*) as totalDays,
                    SUM(CASE WHEN status = 'present' THEN 1 ELSE 0 END) as presentDays,
-                   SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) as absentDays,
-                   SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) as lateDays,
-                   SUM(overtimeHours) as totalOvertimeHours
+                   SUM(overtimeHours) as extraDiurna,
+                   SUM(extraNightHours) as extraNocturna,
+                   SUM(sundayHolidayHours) as extraDominicalDiurna,
+                   SUM(sundayHolidayNightHours) as extraDominicalNocturna
             FROM attendance
             WHERE date >= ? AND date <= ?
             GROUP BY employeeId
@@ -144,182 +157,127 @@ export const calculatePayroll = (req, res) => {
                 attendanceMap[row.employeeId] = row;
             });
             
-            // Calculate payroll for each employee
+            // Reference values for 2024 Colombia
+            const smlv = 1300000;
+            const auxTransporte = 162000;
+
             const payroll = employees.map(e => {
-                const attendance = attendanceMap[e.id] || { presentDays: 22, totalOvertimeHours: 0 }; // Default 22 working days
+                const attendance = attendanceMap[e.id] || { presentDays: 0, extraDiurna: 0, extraNocturna: 0, extraDominicalDiurna: 0, extraNocturna: 0 };
                 const baseSalary = e.salary || 0;
-                const hourlyRate = e.hourlyRate || (baseSalary / 220); // 220 hours per month
                 
-                // Calculate overtime pay (1.5x hourly rate)
-                const overtimeHours = attendance.totalOvertimeHours || 0;
-                const overtimePay = overtimeHours * hourlyRate * 1.5;
+                // Hourly rate (Salary / 235 standard hours)
+                const hoursPerMonth = 235; 
+                const hourlyRate = baseSalary / hoursPerMonth;
                 
-                // Calculate deductions
-                const healthDeduction = baseSalary * 0.04; // 4% salud
-                const pensionDeduction = baseSalary * 0.04; // 4% pensión
-                const incomeTax = calculateIncomeTax(baseSalary + overtimePay); // Simplified income tax
+                // Extra Diurna (1.25x)
+                const payExtraDiurna = (attendance.extraDiurna || 0) * hourlyRate * 1.25;
+                // Extra Nocturna (1.75x)
+                const payExtraNocturna = (attendance.extraNocturna || 0) * hourlyRate * 1.75;
+                // Extra Dominical Diurna (2.0x)
+                const payExtraDominicalDiurna = (attendance.extraDominicalDiurna || 0) * hourlyRate * 2.0;
+                // Extra Dominical Nocturna (2.5x)
+                const payExtraDominicalNocturna = (attendance.extraDominicalNocturna || 0) * hourlyRate * 2.5;
+
+                const totalExtras = payExtraDiurna + payExtraNocturna + payExtraDominicalDiurna + payExtraDominicalNocturna;
                 
-                // Benefits
-                const transportAid = baseSalary <= 2600000 ? 162000 : 0; // Colombia transport aid
-                const foodAid = 99000; // Monthly food aid
+                // IBC (Ingreso Base de Cotización)
+                const ibc = baseSalary + totalExtras;
                 
-                // Bonifications (can be from attendance)
-                const attendanceBonus = attendance.presentDays >= 20 ? 100000 : 0; // Perfect attendance bonus
+                // Deductions (4% Health, 4% Pension)
+                const healthDeduction = ibc * 0.04;
+                const pensionDeduction = ibc * 0.04;
                 
-                const grossSalary = baseSalary + overtimePay + transportAid + foodAid + attendanceBonus;
-                const totalDeductions = healthDeduction + pensionDeduction + incomeTax;
+                // Solidarity Fund (1% if > 4 SMLV)
+                const solidarityFund = ibc >= (smlv * 4) ? ibc * 0.01 : 0;
+                
+                // Transport Aid
+                const transportAid = baseSalary <= (smlv * 2) ? auxTransporte : 0;
+                
+                const grossSalary = ibc + transportAid;
+                const totalDeductions = healthDeduction + pensionDeduction + solidarityFund;
                 const netSalary = grossSalary - totalDeductions;
                 
                 return {
                     id: e.id,
-                    employeeCode: e.employeeCode,
                     name: e.name,
                     role: e.role,
-                    position: e.position,
-                    department: e.department,
                     baseSalary,
-                    hourlyRate,
                     attendance: {
-                        presentDays: attendance.presentDays || 0,
-                        absentDays: attendance.absentDays || 0,
-                        lateDays: attendance.lateDays || 0,
-                        overtimeHours: attendance.totalOvertimeHours || 0
+                        daysPresent: attendance.presentDays,
+                        extraDiurna: attendance.extraDiurna || 0,
+                        extraNocturna: attendance.extraNocturna || 0,
+                        extraDominicalDiurna: attendance.extraDominicalDiurna || 0,
+                        extraDominicalNocturna: attendance.extraDominicalNocturna || 0
                     },
                     earnings: {
                         baseSalary,
-                        overtimePay,
+                        totalExtras,
                         transportAid,
-                        foodAid,
-                        attendanceBonus,
                         gross: grossSalary
                     },
                     deductions: {
                         health: healthDeduction,
                         pension: pensionDeduction,
-                        incomeTax,
+                        solidarity: solidarityFund,
                         total: totalDeductions
                     },
-                    netSalary
+                    netSalary: Math.round(netSalary)
                 };
             });
-            
-            // Calculate totals
-            const totals = payroll.reduce((acc, p) => ({
-                totalGross: acc.totalGross + p.earnings.gross,
-                totalDeductions: acc.totalDeductions + p.deductions.total,
-                totalNet: acc.totalNet + p.netSalary,
-                totalOvertime: acc.totalOvertime + p.attendance.overtimeHours,
-                employeeCount: acc.employeeCount + 1
-            }), { totalGross: 0, totalDeductions: 0, totalNet: 0, totalOvertime: 0, employeeCount: 0 });
             
             res.json({
                 period: { month: targetMonth, year: targetYear },
                 employees: payroll,
-                totals,
+                totals: payroll.reduce((acc, p) => ({
+                    gross: acc.gross + p.earnings.gross,
+                    net: acc.net + p.netSalary,
+                    count: acc.count + 1
+                }), { gross: 0, net: 0, count: 0 }),
                 generatedAt: new Date().toISOString()
             });
         });
     });
 };
 
-// Helper function for simplified income tax calculation (Colombia)
-const calculateIncomeTax = (grossSalary) => {
-    // Simplified Colombian income tax brackets (2024)
-    const brackets = [
-        { min: 0, max: 1090, rate: 0 },
-        { min: 1090, max: 1533, rate: 0.19 },
-        { min: 1533, max: 3639, rate: 0.28 },
-        { min: 3639, max: 7774, rate: 0.33 },
-        { min: 7774, max: Infinity, rate: 0.39 }
-    ];
-    
-    const monthlySalary = grossSalary / 1000; // Convert to SMLV (minimum wage units)
-    let tax = 0;
-    
-    for (const bracket of brackets) {
-        if (monthlySalary > bracket.min) {
-            const taxableInBracket = Math.min(monthlySalary, bracket.max) - bracket.min;
-            tax += taxableInBracket * bracket.rate;
-        }
-    }
-    
-    return tax * 1000; // Convert back to COP
-};
-
 // Record employee attendance
 export const recordAttendance = (req, res) => {
-    const { employeeId, date, status, checkInTime, checkOutTime, overtimeHours, notes } = req.body;
+    const { 
+        employeeId, date, status, 
+        overtimeHours, extraNightHours, 
+        sundayHolidayHours, sundayHolidayNightHours, 
+        notes 
+    } = req.body;
     
-    // Validate required fields
     if (!employeeId || !date || !status) {
         return res.status(400).json({ error: 'employeeId, date y status son requeridos' });
     }
     
-    // Validate status
-    const validStatuses = ['present', 'absent', 'late', 'holiday', 'vacation', 'sick'];
-    if (!validStatuses.includes(status)) {
-        return res.status(400).json({ error: `Status debe ser: ${validStatuses.join(', ')}` });
-    }
-    
-    // Check if employee exists
     db.get('SELECT id, name FROM employees WHERE id = ?', [employeeId], (err, employee) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!employee) return res.status(404).json({ error: 'Empleado no encontrado' });
+        if (err || !employee) return res.status(404).json({ error: 'Empleado no encontrado' });
         
-        // Check if attendance already exists for this date
         db.get('SELECT id FROM attendance WHERE employeeId = ? AND date = ?', [employeeId, date], (err, existing) => {
             if (err) return res.status(500).json({ error: err.message });
             
-            if (existing) {
-                // Update existing attendance
-                db.run(`
-                    UPDATE attendance SET 
-                        status = ?, checkInTime = ?, checkOutTime = ?, 
-                        overtimeHours = ?, notes = ?, updatedAt = datetime('now')
-                    WHERE id = ?
-                `, [status, checkInTime, checkOutTime, overtimeHours || 0, notes, existing.id], function(err) {
-                    if (err) return res.status(500).json({ error: err.message });
-                    
-                    // Log activity
-                    db.run(
-                        'INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)',
-                        [req.user?.id || 0, 'UPDATE_ATTENDANCE', 'EMPLOYEES', 
-                         `Asistencia actualizada: ${employee.name} (${date}) - ${status}`, new Date().toISOString()]
-                    );
-                    
-                    res.json({ 
-                        success: true, 
-                        id: existing.id,
-                        message: 'Asistencia actualizada',
-                        employee: employee.name,
-                        date,
-                        status
-                    });
-                });
-            } else {
-                // Create new attendance record
-                db.run(`
-                    INSERT INTO attendance (employeeId, date, status, checkInTime, checkOutTime, overtimeHours, notes, createdAt)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                `, [employeeId, date, status, checkInTime, checkOutTime, overtimeHours || 0, notes], function(err) {
-                    if (err) return res.status(500).json({ error: err.message });
-                    
-                    // Log activity
-                    db.run(
-                        'INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)',
-                        [req.user?.id || 0, 'CREATE_ATTENDANCE', 'EMPLOYEES', 
-                         `Asistencia registrada: ${employee.name} (${date}) - ${status}`, new Date().toISOString()]
-                    );
-                    
-                    res.status(201).json({ 
-                        id: this.lastID, 
-                        employee: employee.name,
-                        date,
-                        status,
-                        message: 'Asistencia registrada exitosamente'
-                    });
-                });
-            }
+            const sql = existing 
+                ? `UPDATE attendance SET 
+                    status = ?, overtimeHours = ?, extraNightHours = ?, 
+                    sundayHolidayHours = ?, sundayHolidayNightHours = ?, 
+                    notes = ?, updatedAt = datetime('now')
+                    WHERE id = ?`
+                : `INSERT INTO attendance (
+                    status, overtimeHours, extraNightHours, 
+                    sundayHolidayHours, sundayHolidayNightHours, 
+                    notes, createdAt, employeeId, date
+                  ) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?, ?)`;
+            
+            const params = existing
+                ? [status, overtimeHours || 0, extraNightHours || 0, sundayHolidayHours || 0, sundayHolidayNightHours || 0, notes, existing.id]
+                : [status, overtimeHours || 0, extraNightHours || 0, sundayHolidayHours || 0, sundayHolidayNightHours || 0, notes, employeeId, date];
+
+            db.run(sql, params, function(err) {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json({ success: true, message: 'Asistencia registrada' });
+            });
         });
     });
 };
@@ -367,7 +325,52 @@ export const getAttendance = (req, res) => {
             } : { id: employeeId },
             attendance: rows,
             summary,
-            period: { startDate, endDate, month, year }
         });
+    });
+};
+
+// Export Employees (Complete Database)
+export const exportEmployees = (req, res) => {
+    const { status, department, format = 'json' } = req.query;
+    
+    let sql = 'SELECT * FROM employees WHERE 1=1';
+    const params = [];
+
+    if (status) {
+        sql += ' AND status = ?';
+        params.push(status);
+    }
+    if (department) {
+        sql += ' AND department = ?';
+        params.push(department);
+    }
+
+    sql += ' ORDER BY name ASC';
+
+    db.all(sql, params, (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
+        // Convert to CSV
+        const headers = ['Código', 'Nombre', 'Cargo', 'Departamento', 'Salario', 'Fecha Ingreso', 'Estado', 'Teléfono', 'Email'];
+        const csvRows = rows.map(row => [
+            row.employeeCode,
+            `"${(row.name || '').replace(/"/g, '""')}"`,
+            `"${(row.role || '').replace(/"/g, '""')}"`,
+            `"${(row.department || '').replace(/"/g, '""')}"`,
+            row.salary,
+            row.hireDate,
+            row.status,
+            row.phone,
+            row.email
+        ].join(','));
+        
+        const csvContent = [headers.join(','), ...csvRows].join('\n');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=empleados_export.csv');
+        res.send('\ufeff' + csvContent);
     });
 };

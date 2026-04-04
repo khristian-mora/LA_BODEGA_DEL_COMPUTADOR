@@ -6,13 +6,17 @@ import {
     SUPPLIER_CATEGORIES 
 } from '../../services/supplierService';
 import { 
-    Plus, Trash2, Phone, Mail, Box, Edit2, Eye, Download,
+    Plus, Trash2, Phone, Mail, Box, Edit2, Eye, Download, Upload,
     Search, Filter, RefreshCw, Users, TrendingUp, Package,
-    DollarSign, X, Building, MapPin, FileText
+    DollarSign, X, Building, MapPin, FileText, ChevronLeft, ChevronRight, Activity, ArrowRight, CheckCircle, AlertCircle
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import Button from '../../components/Button';
 import { useShop } from '../../context/ShopContext';
+import PortalWrapper from '../../components/PortalWrapper';
 import { useModal } from '../../context/ModalContext';
+import { buildApiUrl } from '../../config/config';
+import * as XLSX from 'xlsx';
 
 const AdminSuppliers = () => {
     const { formatPrice } = useShop();
@@ -27,6 +31,8 @@ const AdminSuppliers = () => {
     const [showForm, setShowForm] = useState(false);
     const [editingSupplier, setEditingSupplier] = useState(null);
     const [showDetail, setShowDetail] = useState(null);
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [importing, setImporting] = useState(false);
     
     // Pagination
     const [currentPage, setCurrentPage] = useState(1);
@@ -35,32 +41,24 @@ const AdminSuppliers = () => {
     const itemsPerPage = 12;
     
     // Filters
-    const [filterStatus] = useState('');
+    const [filterStatus, setFilterStatus] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     
     // Form State
     const [formData, setFormData] = useState({
-        name: '',
-        contact: '',
-        email: '',
-        phone: '',
-        address: '',
-        category: 'Hardware',
-        status: 'active',
-        notes: ''
+        name: '', contact: '', email: '', phone: '', address: '',
+        category: 'Hardware', status: 'active', notes: ''
     });
-    
 
-    
     const categoryOptions = [
-        { value: '', label: 'Todas' },
+        { value: '', label: 'Todas las Categorías' },
         ...SUPPLIER_CATEGORIES
     ];
 
     useEffect(() => {
         fetchSuppliers();
-    }, [currentPage, filterStatus, filterCategory]);
+    }, [currentPage, filterStatus, filterCategory, searchTerm]);
 
     useEffect(() => {
         fetchStatistics();
@@ -69,23 +67,20 @@ const AdminSuppliers = () => {
     const fetchSuppliers = async () => {
         setLoading(true);
         try {
-            const params = {
-                page: currentPage,
-                limit: itemsPerPage
-            };
+            const params = { page: currentPage, limit: itemsPerPage };
             if (filterStatus) params.status = filterStatus;
             if (filterCategory) params.category = filterCategory;
             if (searchTerm) params.search = searchTerm;
 
             const data = await supplierService.getSuppliers(params);
-            setSuppliers(data.suppliers || data);
-            if (data.pagination) {
-                setTotalPages(data.pagination.totalPages);
-                setTotalItems(data.pagination.total);
-            }
+            const suppliersList = Array.isArray(data) ? data : (data.suppliers || []);
+            setSuppliers(suppliersList);
+            
+            const pagination = data.pagination || {};
+            setTotalPages(pagination.totalPages || 1);
+            setTotalItems(pagination.total || suppliersList.length);
         } catch (error) {
-            console.error('Error fetching suppliers:', error);
-            showAlert({ title: 'Error', message: 'Error al cargar proveedores', type: 'error' });
+            showAlert({ title: 'Error de Red', message: 'Fallo al sincronizar proveedores', type: 'error' });
         } finally {
             setLoading(false);
         }
@@ -100,22 +95,104 @@ const AdminSuppliers = () => {
         }
     };
 
-    const handleSearch = () => {
-        setCurrentPage(1);
-        fetchSuppliers();
+    const handleExport = async () => {
+        try {
+            const data = await supplierService.exportSuppliers({
+                status: filterStatus || null,
+                category: filterCategory || null,
+                format: 'json'
+            });
+
+            if (!data || data.length === 0) {
+                showAlert({ title: 'Sin Datos', message: 'No hay proveedores para exportar', type: 'info' });
+                return;
+            }
+            
+            const exportData = data.map(s => ({
+                'ID': s.id,
+                'Nombre / Empresa': s.name,
+                'Contacto Principal': s.contact || 'N/A',
+                'Correo Electrónico': s.email,
+                'Teléfono': s.phone || 'N/A',
+                'Dirección Física': s.address || 'N/A',
+                'Categoría': s.category,
+                'Estado Operativo': s.status === 'active' ? 'ACTIVO' : 'INACTIVO',
+                'Total Productos': s.productCount || 0,
+                'Fecha Registro': new Date(s.createdAt).toLocaleString(),
+                'Notas / Observaciones': s.notes || ''
+            }));
+            
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Proveedores');
+
+            // Fit columns
+            const wscols = [
+                { wch: 10 }, { wch: 30 }, { wch: 25 }, { wch: 30 }, 
+                { wch: 15 }, { wch: 40 }, { wch: 20 }, { wch: 15 }, 
+                { wch: 15 }, { wch: 20 }, { wch: 50 }
+            ];
+            ws['!cols'] = wscols;
+
+            XLSX.writeFile(wb, `Reporte_Proveedores_${new Date().toISOString().split('T')[0]}.xlsx`);
+        } catch (error) {
+            console.error('Export error:', error);
+            showAlert({ title: 'Error', message: 'No se pudo generar el reporte de proveedores', type: 'error' });
+        }
+    };
+
+    const handleImport = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        setImporting(true);
+        try {
+            const data = await file.arrayBuffer();
+            const workbook = XLSX.read(data);
+            const sheet = workbook.Sheets[workbook.SheetNames[0]];
+            const jsonData = XLSX.utils.sheet_to_json(sheet);
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch(buildApiUrl('/api/suppliers/import'), {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` },
+                body: formData
+            });
+            
+            if (!response.ok) throw new Error('Error en la importación');
+            
+            showAlert({ title: 'Éxito', message: `Se importaron ${jsonData.length} proveedores`, type: 'success' });
+            fetchSuppliers();
+            setShowImportModal(false);
+        } catch (error) {
+            showAlert({ title: 'Error', message: error.message, type: 'error' });
+        } finally {
+            setImporting(false);
+            e.target.value = '';
+        }
+    };
+
+    const downloadTemplate = () => {
+        const data = [{
+            Nombre: 'Proveedor Ejemplo',
+            Contacto: 'Juan Perez',
+            Email: 'contacto@proveedor.com',
+            Telefono: '3001234567',
+            Direccion: 'Calle 123 #45-67',
+            Categoria: 'Hardware',
+            Estado: 'active',
+            Notas: 'Notas opcionales'
+        }];
+        const ws = XLSX.utils.json_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Proveedores');
+        XLSX.writeFile(wb, 'plantilla_proveedores_lbdc.xlsx');
     };
 
     const resetForm = () => {
-        setFormData({
-            name: '',
-            contact: '',
-            email: '',
-            phone: '',
-            address: '',
-            category: 'Hardware',
-            status: 'active',
-            notes: ''
-        });
+        setFormData({ name: '', contact: '', email: '', phone: '', address: '', category: 'Hardware', status: 'active', notes: '' });
         setEditingSupplier(null);
     };
 
@@ -140,598 +217,613 @@ const AdminSuppliers = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
-        
-        if (!formData.name.trim()) {
-            showAlert({ title: 'Error', message: 'El nombre es requerido', type: 'error' });
-            return;
-        }
-        
-        if (!formData.email.trim()) {
-            showAlert({ title: 'Error', message: 'El email es requerido', type: 'error' });
-            return;
-        }
-
         setLoading(true);
         try {
             if (editingSupplier) {
                 await supplierService.updateSupplier(editingSupplier.id, formData);
-                showAlert({ title: 'Éxito', message: 'Proveedor actualizado correctamente', type: 'success' });
+                showAlert({ title: 'Éxito Operativo', message: 'Perfil de proveedor actualizado', type: 'success' });
             } else {
                 await supplierService.addSupplier(formData);
-                showAlert({ title: 'Éxito', message: 'Proveedor creado correctamente', type: 'success' });
+                showAlert({ title: 'Éxito Operativo', message: 'Nuevo aliado registrado en la red', type: 'success' });
             }
-            
             setShowForm(false);
             resetForm();
-            await fetchSuppliers();
-            await fetchStatistics();
+            fetchSuppliers();
+            fetchStatistics();
         } catch (error) {
-            showAlert({ title: 'Error', message: error.message || 'Error al guardar proveedor', type: 'error' });
+            showAlert({ title: 'Error de Validacion', message: error.message, type: 'error' });
         } finally {
             setLoading(false);
         }
     };
 
-    const handleDelete = async (supplier) => {
-        showConfirm(`¿Estás seguro de eliminar el proveedor "${supplier.name}"?`, async () => {
-            try {
-                await supplierService.deleteSupplier(supplier.id);
-                showAlert({ title: 'Éxito', message: 'Proveedor eliminado correctamente', type: 'success' });
-                await fetchSuppliers();
-                await fetchStatistics();
-            } catch (error) {
-                showAlert({ title: 'Error', message: error.message || 'Error al eliminar proveedor', type: 'error' });
-            }
+    const handleDelete = async (supplierId) => {
+        const confirmed = await showConfirm({
+            title: 'Desvincular Aliado',
+            message: '¿Estás seguro de eliminar este proveedor de la cadena de suministro?',
+            variant: 'danger'
         });
-    };
-
-    const handleExport = async () => {
+        if (!confirmed) return;
         try {
-            const params = {};
-            if (filterStatus) params.status = filterStatus;
-            if (filterCategory) params.category = filterCategory;
-
-            const csvContent = await supplierService.exportSuppliers(params);
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = `proveedores_${new Date().toISOString().split('T')[0]}.csv`;
-            link.click();
+            await supplierService.deleteSupplier(supplierId);
+            showAlert({ title: 'Purga Completada', message: 'Proveedor desvinculado exitosamente', type: 'success' });
+            fetchSuppliers();
+            fetchStatistics();
         } catch (error) {
-            showAlert({ title: 'Error', message: 'Error al exportar', type: 'error' });
+            showAlert({ title: 'Acceso Denegado', message: error.message, type: 'error' });
         }
     };
 
-    const getStatusBadge = (status) => {
-        const config = SUPPLIER_STATUS_CONFIG[status] || { label: status, color: 'bg-gray-100 text-gray-700' };
-        return (
-            <span className={`${config.color} px-2 py-1 rounded-md text-xs font-bold uppercase`}>
-                {config.label}
-            </span>
-        );
+    const getStatusStyle = (status) => {
+        switch (status) {
+            case 'active': return 'bg-emerald-500/10 text-emerald-600 border-emerald-200';
+            case 'inactive': return 'bg-red-500/10 text-red-600 border-red-200';
+            default: return 'bg-amber-500/10 text-amber-600 border-amber-200';
+        }
     };
 
-    // Client-side search filtering
-    const filteredSuppliers = useMemo(() => {
-        if (!searchTerm) return suppliers;
-        return suppliers.filter(supplier =>
-            supplier.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            supplier.contact?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            supplier.email?.toLowerCase().includes(searchTerm.toLowerCase())
-        );
-    }, [suppliers, searchTerm]);
-
-    // Calculate local stats
-    const localStats = useMemo(() => {
-        if (!suppliers.length) return null;
-        const active = suppliers.filter(s => s.status === 'active').length;
-        const inactive = suppliers.filter(s => s.status === 'inactive').length;
-        const pending = suppliers.filter(s => s.status === 'pending').length;
-        const totalProducts = suppliers.reduce((sum, s) => sum + (s.productCount || 0), 0);
-        const totalExpenses = suppliers.reduce((sum, s) => sum + (s.totalExpenses || 0), 0);
-        return { active, inactive, pending, totalProducts, totalExpenses };
-    }, [suppliers]);
-
-    if (loading && !statistics && suppliers.length === 0) {
-        return (
-            <AdminLayout title="Proveedores">
-                <div className="flex items-center justify-center h-64">
-                    <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
-                </div>
-            </AdminLayout>
-        );
-    }
-
     return (
-        <AdminLayout title="Gestión de Proveedores">
-            <div className="space-y-8 animate-fade-in-up">
+        <AdminLayout title="Centro de Proveedores">
+            <div className="space-y-6 pb-12">
                 
-                {/* Header Actions */}
-                <div className="flex justify-between items-center">
-                    <p className="text-gray-500">Base de datos de aliados estratégicos y proveedores.</p>
-                    <div className="flex gap-2">
-                        <Button onClick={handleExport} variant="outline" className="flex items-center gap-2">
-                            <Download className="w-4 h-4" /> Exportar CSV
-                        </Button>
-                        <Button onClick={() => handleOpenForm()} className="flex items-center gap-2">
-                            <Plus className="w-4 h-4" /> Nuevo Proveedor
-                        </Button>
-                    </div>
+                {/* Industrial KPI Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-indigo-50 rounded-2xl text-indigo-600 transition-transform group-hover:scale-110">
+                                <Building className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-indigo-500 bg-indigo-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Red de Aliados</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{statistics?.summary?.totalSuppliers || totalItems}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Proveedores Activos</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-emerald-50 rounded-2xl text-emerald-600 transition-transform group-hover:scale-110">
+                                <Package className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-emerald-500 bg-emerald-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Stock Suministrado</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{statistics?.summary?.totalProducts || 0}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">SKUs Vinculados</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+                        className="bg-slate-900 p-6 rounded-[2.5rem] border border-slate-800 shadow-2xl relative overflow-hidden group"
+                    >
+                        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none group-hover:scale-150 transition-transform">
+                            <Activity className="w-24 h-24 text-white" />
+                        </div>
+                        <div className="flex justify-between items-start mb-4 relative z-10">
+                            <div className="p-3 bg-white/10 rounded-2xl text-white">
+                                <TrendingUp className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-white/50 bg-white/10 px-2 py-0.5 rounded-full uppercase tracking-tighter">Flujo Operativo</span>
+                        </div>
+                        <div className="space-y-1 relative z-10">
+                            <h4 className="text-3xl font-black text-white tracking-tighter">{formatPrice(statistics?.summary?.totalExpenses || 0)}</h4>
+                            <p className="text-[11px] font-bold text-white/40 uppercase tracking-widest">Gasto Total Acumulado</p>
+                        </div>
+                    </motion.div>
+
+                    <motion.div 
+                        initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
+                        className="bg-white/70 backdrop-blur-xl p-6 rounded-[2.5rem] border border-white/40 shadow-sm relative overflow-hidden group"
+                    >
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="p-3 bg-amber-50 rounded-2xl text-amber-600 transition-transform group-hover:scale-110">
+                                <RefreshCw className="w-6 h-6" />
+                            </div>
+                            <span className="text-[10px] font-black text-amber-500 bg-amber-50/50 px-2 py-0.5 rounded-full uppercase tracking-tighter">Diversidad</span>
+                        </div>
+                        <div className="space-y-1">
+                            <h4 className="text-4xl font-black text-slate-900 tracking-tighter">{statistics?.categoryDistribution?.length || 0}</h4>
+                            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest">Categorías de Suministro</p>
+                        </div>
+                    </motion.div>
                 </div>
 
-                {/* KPI Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                    {/* Total Proveedores */}
-                    <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-6 rounded-2xl shadow-lg text-white">
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <p className="text-blue-100 text-sm font-medium">Total Proveedores</p>
-                                <h3 className="text-3xl font-bold mt-2">{statistics?.summary?.totalSuppliers || totalItems || suppliers.length}</h3>
+                <div className="bg-white/70 backdrop-blur-2xl rounded-[3rem] shadow-2xl border border-white/50 overflow-hidden">
+                    {/* Industrial Toolbar */}
+                    <div className="p-10 border-b border-gray-100/50 flex flex-col lg:flex-row justify-between items-center bg-gray-50/10 gap-8">
+                        <div className="flex items-center gap-6">
+                            <div className="w-16 h-16 bg-slate-900 rounded-3xl flex items-center justify-center shadow-2xl shadow-slate-200 group transition-all hover:scale-105">
+                                <Users className="w-8 h-8 text-white group-hover:rotate-12 transition-transform" />
                             </div>
-                            <Building className="w-8 h-8 text-blue-200" />
-                        </div>
-                        <div className="mt-4 flex items-center text-blue-100 text-sm">
-                            <span>Registrados</span>
-                        </div>
-                    </div>
-
-                    {/* Activos */}
-                    <div className="bg-gradient-to-br from-green-500 to-green-600 p-6 rounded-2xl shadow-lg text-white">
-                        <div className="flex justify-between items-start">
                             <div>
-                                <p className="text-green-100 text-sm font-medium">Activos</p>
-                                <h3 className="text-3xl font-bold mt-2">{statistics?.summary?.activeSuppliers || localStats?.active || suppliers.filter(s => s.status === 'active').length}</h3>
-                            </div>
-                            <Users className="w-8 h-8 text-green-200" />
-                        </div>
-                        <div className="mt-4 flex items-center text-green-100 text-sm">
-                            <TrendingUp className="w-4 h-4 mr-1" />
-                            <span>Proveedores activos</span>
-                        </div>
-                    </div>
-
-                    {/* Productos Totales */}
-                    <div className="bg-gradient-to-br from-purple-500 to-purple-600 p-6 rounded-2xl shadow-lg text-white">
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <p className="text-purple-100 text-sm font-medium">Productos Totales</p>
-                                <h3 className="text-3xl font-bold mt-2">{statistics?.summary?.totalProducts || localStats?.totalProducts || suppliers.reduce((sum, s) => sum + (s.productCount || 0), 0)}</h3>
-                            </div>
-                            <Package className="w-8 h-8 text-purple-200" />
-                        </div>
-                        <div className="mt-4 flex items-center text-purple-100 text-sm">
-                            <span>De todos los proveedores</span>
-                        </div>
-                    </div>
-
-                    {/* Gastos Totales */}
-                    <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-6 rounded-2xl shadow-lg text-white">
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <p className="text-orange-100 text-sm font-medium">Gastos Totales</p>
-                                <h3 className="text-2xl font-bold mt-2">{formatPrice(statistics?.summary?.totalExpenses || localStats?.totalExpenses || 0)}</h3>
-                            </div>
-                            <DollarSign className="w-8 h-8 text-orange-200" />
-                        </div>
-                        <div className="mt-4 flex items-center text-orange-100 text-sm">
-                            <span>Registrados en gastos</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Category Distribution */}
-                {statistics?.categoryDistribution && statistics.categoryDistribution.length > 0 && (
-                    <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Distribución por Categoría</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {statistics.categoryDistribution.map((cat, idx) => (
-                                <div key={idx} className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-                                    <p className="text-sm text-gray-500">{cat.category}</p>
-                                    <p className="text-2xl font-bold text-gray-800">{cat.count}</p>
-                                    <p className="text-xs text-gray-400">{cat.totalProducts || 0} productos</p>
+                                <h3 className="font-black text-3xl text-slate-900 tracking-tight leading-none mb-2">Gestión de Proveedores</h3>
+                                <div className="flex items-center gap-3">
+                                    <span className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(79,70,229,0.5)]"></span>
+                                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em]">{totalItems} Proveedores Activos</p>
                                 </div>
-                            ))}
+                            </div>
                         </div>
-                    </div>
-                )}
 
-                {/* Filter Bar */}
-                <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        {/* Search */}
-                        <div className="md:col-span-2">
-                            <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                                <input
-                                    type="text"
-                                    placeholder="Buscar por nombre, contacto o email..."
+                        <div className="flex flex-wrap items-center gap-4 w-full lg:w-auto">
+                            <div className="relative flex-1 lg:w-80">
+                                <Search className="absolute left-5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Nombre de proveedor o contacto..."
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full pl-12 pr-5 py-4 bg-white border border-slate-100 rounded-[1.5rem] text-sm font-medium transition-all focus:ring-[6px] focus:ring-slate-50 focus:border-slate-300 outline-none placeholder:text-slate-400"
                                 />
                             </div>
+                            
+                            <select 
+                                value={filterCategory}
+                                onChange={(e) => { setFilterCategory(e.target.value); setCurrentPage(1); }}
+                                className="px-6 py-4 bg-white border border-slate-100 rounded-[1.5rem] text-[11px] font-black uppercase tracking-widest transition-all outline-none appearance-none focus:ring-[6px] focus:ring-slate-50 min-w-[220px] cursor-pointer hover:bg-slate-50"
+                            >
+                                {categoryOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label.toUpperCase()}</option>
+                                ))}
+                            </select>
+
+                            <motion.button 
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={handleExport}
+                                className="h-14 px-6 bg-white border border-slate-200 text-slate-700 rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all"
+                            >
+                                <Download className="w-4 h-4" /> Exportar
+                            </motion.button>
+                            
+                            <motion.button 
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={() => setShowImportModal(true)}
+                                className="h-14 px-6 bg-white border border-slate-200 text-slate-700 rounded-[1.5rem] font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-700 transition-all"
+                            >
+                                <Upload className="w-4 h-4" /> Importar
+                            </motion.button>
+
+                            <motion.button 
+                                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                onClick={() => handleOpenForm()}
+                                className="h-14 flex-1 lg:flex-none bg-slate-900 text-white rounded-[1.5rem] shadow-2xl shadow-slate-200 hover:bg-black font-black text-[11px] uppercase tracking-widest flex items-center justify-center gap-3 px-8 transition-colors"
+                            >
+                                <Plus className="w-5 h-5" /> Registrar Proveedor
+                            </motion.button>
                         </div>
-                        
-                        {/* Category Filter */}
-                        <select
-                            value={filterCategory}
-                            onChange={(e) => { setFilterCategory(e.target.value); setCurrentPage(1); }}
-                            className="px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        >
-                            {categoryOptions.map(opt => (
-                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                            ))}
-                        </select>
-                        
-                        {/* Search Button */}
-                        <Button onClick={handleSearch} variant="outline" className="flex items-center justify-center gap-2">
-                            <Filter className="w-4 h-4" /> Filtrar
-                        </Button>
                     </div>
-                </div>
 
-                {/* Suppliers Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredSuppliers.map((supplier) => (
-                        <div key={supplier.id} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-shadow relative group">
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-xl uppercase">
-                                    {supplier.name?.substring(0, 2) || '??'}
+                    {/* Industrial Grid Ledger */}
+                    <div className="p-8 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                        <AnimatePresence mode="popLayout">
+                            {loading ? (
+                                <div className="col-span-full py-32 text-center flex flex-col items-center gap-6">
+                                    <div className="w-16 h-16 border-[6px] border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                                    <p className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em] animate-pulse">Sincronizando Módulo de Abasto...</p>
                                 </div>
-                                <div className="flex gap-1">
-                                    {getStatusBadge(supplier.status)}
+                            ) : suppliers.length === 0 ? (
+                                <div className="col-span-full py-32 text-center flex flex-col items-center gap-6 opacity-20">
+                                    <Building className="w-24 h-24 text-slate-400" />
+                                    <p className="text-xs font-black uppercase tracking-[0.3em]">No se han detectado proveedores vinculados bajo estos parámetros</p>
                                 </div>
-                            </div>
-
-                            <h3 className="font-bold text-lg text-gray-900 mb-1">{supplier.name}</h3>
-                            <p className="text-gray-500 text-sm mb-1">{supplier.category}</p>
-                            <p className="text-gray-500 text-sm mb-4">Contacto: {supplier.contact || 'N/A'}</p>
-
-                            <div className="space-y-2 text-sm text-gray-600">
-                                <div className="flex items-center gap-2">
-                                    <Mail className="w-4 h-4 text-gray-400" />
-                                    <span className="truncate">{supplier.email}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Phone className="w-4 h-4 text-gray-400" />
-                                    {supplier.phone || 'N/A'}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Package className="w-4 h-4 text-gray-400" />
-                                    Productos: <span className="font-bold text-gray-800">{supplier.productCount || 0}</span>
-                                </div>
-                                {supplier.totalExpenses > 0 && (
-                                    <div className="flex items-center gap-2">
-                                        <DollarSign className="w-4 h-4 text-gray-400" />
-                                        Gastos: <span className="font-bold text-gray-800">{formatPrice(supplier.totalExpenses)}</span>
+                            ) : suppliers.map((supplier, idx) => (
+                                <motion.div
+                                    key={supplier.id}
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    transition={{ delay: idx * 0.03 }}
+                                    className="bg-white border border-slate-100 rounded-[2.5rem] p-8 hover:shadow-2xl hover:shadow-slate-100 transition-all group relative"
+                                >
+                                    <div className="flex justify-between items-start mb-6">
+                                        <div className="w-16 h-16 bg-slate-50 rounded-[1.5rem] flex items-center justify-center text-slate-900 font-black text-2xl group-hover:bg-slate-900 group-hover:text-white transition-all cursor-default shadow-sm border border-slate-100">
+                                            {supplier.name?.charAt(0)}
+                                        </div>
+                                        <div className={`px-4 py-1.5 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest shadow-sm ${getStatusStyle(supplier.status)}`}>
+                                            {supplier.status}
+                                        </div>
                                     </div>
-                                )}
-                            </div>
 
-                            {/* Action Buttons */}
-                            <div className="absolute top-4 right-4 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                                <button
-                                    onClick={() => setShowDetail(supplier)}
-                                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                                    title="Ver detalles"
+                                    <div className="space-y-1 mb-6">
+                                        <h3 className="text-xl font-black text-slate-900 tracking-tight leading-none group-hover:text-indigo-600 transition-colors uppercase">{supplier.name}</h3>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">{supplier.category} / Proveedor</p>
+                                    </div>
+
+                                    <div className="space-y-4 mb-8">
+                                        <div className="flex items-center gap-4 text-slate-600">
+                                            <div className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+                                                <Mail className="w-4 h-4" />
+                                            </div>
+                                            <span className="text-sm font-bold truncate">{supplier.email}</span>
+                                        </div>
+                                        <div className="flex items-center gap-4 text-slate-600">
+                                            <div className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+                                                <Phone className="w-4 h-4" />
+                                            </div>
+                                            <span className="text-sm font-bold">{supplier.phone || 'COMM-OFFLINE'}</span>
+                                        </div>
+                                        <div className="flex items-center gap-4 text-slate-600">
+                                            <div className="w-10 h-10 bg-slate-50 rounded-2xl flex items-center justify-center text-slate-400">
+                                                <Package className="w-4 h-4" />
+                                            </div>
+                                            <span className="text-sm font-bold">{supplier.productCount || 0} SKUs Registrados</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="pt-6 border-t border-slate-50 flex gap-3">
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                            onClick={() => setShowDetail(supplier)}
+                                            className="flex-1 h-12 bg-slate-50 text-slate-400 rounded-2xl flex items-center justify-center hover:bg-slate-900 hover:text-white transition-all shadow-sm border border-slate-100"
+                                        >
+                                            <Eye className="w-5 h-5" />
+                                        </motion.button>
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                            onClick={() => handleOpenForm(supplier)}
+                                            className="flex-1 h-12 bg-white text-indigo-500 rounded-2xl flex items-center justify-center hover:bg-indigo-600 hover:text-white transition-all shadow-sm border border-indigo-100/50"
+                                        >
+                                            <Edit2 className="w-5 h-5" />
+                                        </motion.button>
+                                        <motion.button
+                                            whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                                            onClick={() => handleDelete(supplier.id)}
+                                            className="flex-1 h-12 bg-white text-red-400 rounded-2xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-sm border border-red-100/50"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
+                                        </motion.button>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </AnimatePresence>
+                    </div>
+
+                    {/* Industrial Pagination */}
+                    {totalPages > 1 && (
+                        <div className="p-10 border-t border-slate-50 bg-slate-50/20 flex justify-between items-center">
+                            <p className="text-[11px] font-black text-slate-400 uppercase tracking-widest italic">Páginas de Suministro: {currentPage} / {totalPages}</p>
+                            <div className="flex gap-3">
+                                <motion.button 
+                                    whileHover={{ x: -2 }}
+                                    disabled={currentPage === 1}
+                                    onClick={() => setCurrentPage(p => p - 1)}
+                                    className="p-4 bg-white border border-slate-100 rounded-2xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
-                                    <Eye className="w-4 h-4" />
-                                </button>
-                                <button
-                                    onClick={() => handleOpenForm(supplier)}
-                                    className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-                                    title="Editar"
+                                    <ChevronLeft className="w-5 h-5" />
+                                </motion.button>
+                                <motion.button 
+                                    whileHover={{ x: 2 }}
+                                    disabled={currentPage === totalPages}
+                                    onClick={() => setCurrentPage(p => p + 1)}
+                                    className="p-4 bg-white border border-slate-100 rounded-2xl disabled:opacity-30 hover:border-slate-900 transition-all shadow-sm"
                                 >
-                                    <Edit2 className="w-4 h-4" />
-                                </button>
-                                <button
-                                    onClick={() => handleDelete(supplier)}
-                                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                                    title="Eliminar"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
+                                    <ChevronRight className="w-5 h-5" />
+                                </motion.button>
                             </div>
                         </div>
-                    ))}
+                    )}
                 </div>
-                
-                {/* Empty State */}
-                {filteredSuppliers.length === 0 && !loading && (
-                    <div className="text-center py-12 bg-white rounded-2xl border border-gray-100">
-                        <Building className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-                        <h3 className="text-lg font-medium text-gray-600">No se encontraron proveedores</h3>
-                        <p className="text-gray-400 mt-1">Agrega tu primer proveedor para comenzar</p>
-                    </div>
-                )}
-                
-                {/* Pagination */}
-                {totalPages > 1 && (
-                    <div className="flex items-center justify-between bg-white px-6 py-4 rounded-xl border border-gray-100">
-                        <p className="text-sm text-gray-500">
-                            Mostrando {((currentPage - 1) * itemsPerPage) + 1} - {Math.min(currentPage * itemsPerPage, totalItems)} de {totalItems} proveedores
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <button
-                                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                disabled={currentPage === 1}
-                                className="px-3 py-1 rounded border border-gray-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                            >
-                                Anterior
-                            </button>
-                            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                                const page = currentPage <= 3 ? i + 1 : currentPage + i - 2;
-                                if (page > totalPages || page < 1) return null;
-                                return (
-                                    <button
-                                        key={page}
-                                        onClick={() => setCurrentPage(page)}
-                                        className={`px-3 py-1 rounded text-sm ${
-                                            currentPage === page 
-                                                ? 'bg-blue-600 text-white' 
-                                                : 'border border-gray-300 hover:bg-gray-50'
-                                        }`}
-                                    >
-                                        {page}
-                                    </button>
-                                );
-                            })}
-                            <button
-                                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                disabled={currentPage === totalPages}
-                                className="px-3 py-1 rounded border border-gray-300 text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
-                            >
-                                Siguiente
-                            </button>
-                        </div>
-                    </div>
-                )}
             </div>
 
-            {/* Create/Edit Modal */}
-            {showForm && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto animate-fade-in-up">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100">
-                            <h2 className="text-xl font-bold text-gray-800">
-                                {editingSupplier ? 'Editar Proveedor' : 'Nuevo Proveedor'}
-                            </h2>
-                            <button onClick={() => { setShowForm(false); resetForm(); }} className="text-gray-400 hover:text-gray-600">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        
-                        <form onSubmit={handleSubmit} className="p-6 space-y-5">
-                            {/* Company Name */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Nombre de Empresa <span className="text-red-500">*</span>
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.name}
-                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                    placeholder="Ej: Microsoft"
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                                {/* Contact */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Contacto
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={formData.contact}
-                                        onChange={(e) => setFormData({ ...formData, contact: e.target.value })}
-                                        placeholder="Ej: Juan Pérez"
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    />
+            {/* Industrial Form Modal */}
+            <PortalWrapper isOpen={showForm}>
+                {showForm && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowForm(false)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+                            className="bg-white rounded-[3.5rem] w-full max-w-2xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+                        >
+                            <div className="p-10 border-b border-gray-100 flex justify-between items-center bg-slate-50/50">
+                                <div className="flex items-center gap-6">
+                                    <div className="w-16 h-16 bg-slate-900 rounded-[1.75rem] flex items-center justify-center shadow-2xl">
+                                        <Building className="w-8 h-8 text-white" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-black text-3xl text-slate-900 tracking-tight mb-1">
+                                            {editingSupplier ? 'Editar Proveedor' : 'Registrar Proveedor'}
+                                        </h3>
+                                        <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">Formulario de Registro de Proveedores</p>
+                                    </div>
                                 </div>
-                                
-                                {/* Category */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Categoría <span className="text-red-500">*</span>
-                                    </label>
-                                    <select
-                                        value={formData.category}
-                                        onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    >
-                                        {SUPPLIER_CATEGORIES.map(cat => (
-                                            <option key={cat.value} value={cat.value}>{cat.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
+                                <button onClick={() => setShowForm(false)} className="w-12 h-12 flex items-center justify-center hover:bg-slate-100 rounded-2xl transition-all"><X className="w-6 h-6 text-slate-400" /></button>
                             </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                                {/* Email */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Email <span className="text-red-500">*</span>
-                                    </label>
-                                    <input
-                                        type="email"
-                                        value={formData.email}
-                                        onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                                        placeholder="email@empresa.com"
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    />
-                                </div>
-                                
-                                {/* Phone */}
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                                        Teléfono
-                                    </label>
-                                    <input
-                                        type="text"
-                                        value={formData.phone}
-                                        onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                                        placeholder="+1 234 567 890"
-                                        className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                    />
-                                </div>
-                            </div>
-                            
-                            {/* Address */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Dirección
-                                </label>
-                                <input
-                                    type="text"
-                                    value={formData.address}
-                                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                                    placeholder="Dirección de la empresa"
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                            </div>
-                            
-                            {/* Status */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Estado
-                                </label>
-                                <select
-                                    value={formData.status}
-                                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                >
-                                    <option value="active">Activo</option>
-                                    <option value="inactive">Inactivo</option>
-                                    <option value="pending">Pendiente</option>
-                                </select>
-                            </div>
-                            
-                            {/* Notes */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">
-                                    Notas
-                                </label>
-                                <textarea
-                                    value={formData.notes}
-                                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                                    placeholder="Notas adicionales..."
-                                    rows="3"
-                                    className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                />
-                            </div>
-                            
-                            {/* Actions */}
-                            <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-                                <Button type="button" variant="outline" onClick={() => { setShowForm(false); resetForm(); }}>
-                                    Cancelar
-                                </Button>
-                                <Button type="submit" disabled={loading}>
-                                    {loading ? 'Guardando...' : editingSupplier ? 'Actualizar' : 'Crear Proveedor'}
-                                </Button>
-                            </div>
-                        </form>
-                    </div>
-                </div>
-            )}
 
-            {/* Detail Modal */}
-            {showDetail && (
-                <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl w-full max-w-md animate-fade-in-up">
-                        <div className="flex justify-between items-center p-6 border-b border-gray-100">
-                            <h2 className="text-xl font-bold text-gray-800">Detalle del Proveedor</h2>
-                            <button onClick={() => setShowDetail(null)} className="text-gray-400 hover:text-gray-600">
-                                <X className="w-6 h-6" />
-                            </button>
-                        </div>
-                        
-                        <div className="p-6 space-y-4">
-                            <div className="flex items-center gap-4">
-                                <div className="w-16 h-16 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600 font-bold text-2xl uppercase">
-                                    {showDetail.name?.substring(0, 2) || '??'}
+                            <form onSubmit={handleSubmit} className="p-10 overflow-y-auto custom-scrollbar space-y-8">
+                                <div className="space-y-6">
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Entidad Corporativa *</label>
+                                        <input 
+                                            required 
+                                            type="text" 
+                                            value={formData.name} 
+                                            onChange={e => setFormData({ ...formData, name: e.target.value })} 
+                                            className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all placeholder:font-bold placeholder:text-slate-300" 
+                                            placeholder="Nombre Comercial del Proveedor..."
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Persona de Contacto</label>
+                                            <input 
+                                                type="text" 
+                                                value={formData.contact} 
+                                                onChange={e => setFormData({ ...formData, contact: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all" 
+                                                placeholder="Responsable de Cuenta..."
+                                            />
+                                        </div>
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Categoría Técnica *</label>
+                                            <select 
+                                                required 
+                                                value={formData.category} 
+                                                onChange={e => setFormData({ ...formData, category: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none"
+                                            >
+                                                {SUPPLIER_CATEGORIES.map(cat => <option key={cat.value} value={cat.value}>{cat.label.toUpperCase()}</option>)}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Canal Digital (Email) *</label>
+                                            <input 
+                                                required 
+                                                type="email" 
+                                                value={formData.email} 
+                                                onChange={e => setFormData({ ...formData, email: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all" 
+                                                placeholder="email@proveedor.com"
+                                            />
+                                        </div>
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Línea Telefónica</label>
+                                            <input 
+                                                type="text" 
+                                                value={formData.phone} 
+                                                onChange={e => setFormData({ ...formData, phone: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all" 
+                                                placeholder="+XX XXX XXX XXXX"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Domicilio Fiscal / Almacén</label>
+                                        <input 
+                                            type="text" 
+                                            value={formData.address} 
+                                            onChange={e => setFormData({ ...formData, address: e.target.value })} 
+                                            className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all" 
+                                            placeholder="Ubicación física de despacho..."
+                                        />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-3">
+                                            <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Status Operativo</label>
+                                            <select 
+                                                value={formData.status} 
+                                                onChange={e => setFormData({ ...formData, status: e.target.value })} 
+                                                className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all px-8 appearance-none"
+                                            >
+                                                <option value="active">ACTIVO - PRIORIDAD 1</option>
+                                                <option value="inactive">INACTIVO - STANDBY</option>
+                                                <option value="pending">PENDIENTE - AUDITORÍA</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[11px] font-black text-slate-400 uppercase tracking-widest pl-2">Protocolos / Notas</label>
+                                        <textarea 
+                                            value={formData.notes} 
+                                            onChange={e => setFormData({ ...formData, notes: e.target.value })} 
+                                            className="w-full p-5 bg-slate-50 border-2 border-transparent rounded-[1.75rem] text-sm font-bold focus:bg-white focus:border-indigo-100 outline-none transition-all resize-none" 
+                                            rows="4" 
+                                            placeholder="Detallar acuerdos de entrega, SLAs o información crítica de suministro..."
+                                        />
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="text-xl font-bold text-gray-800">{showDetail.name}</h3>
-                                    <p className="text-gray-500">{showDetail.category}</p>
-                                    <div className="mt-1">{getStatusBadge(showDetail.status)}</div>
+
+                                <div className="flex gap-4 pt-4">
+                                    <button 
+                                        type="button" 
+                                        onClick={() => setShowForm(false)}
+                                        className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] hover:bg-slate-200 transition-all"
+                                    >
+                                        Cancelar
+                                    </button>
+                                    <button 
+                                        type="submit" 
+                                        disabled={loading}
+                                        className="flex-1 py-5 bg-slate-900 text-white rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 hover:bg-black transition-all flex items-center justify-center gap-2"
+                                    >
+                                        {loading ? <div className="w-5 h-5 border-[3px] border-white/30 border-t-white rounded-full animate-spin"></div> : (editingSupplier ? 'Guardar Cambios' : 'Registrar Proveedor')}
+                                    </button>
+                                </div>
+                            </form>
+                        </motion.div>
+                    </div>
+                )}
+            </PortalWrapper>
+
+            {/* Industrial Detail Modal */}
+            <PortalWrapper isOpen={showDetail}>
+                {showDetail && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-6">
+                        <motion.div 
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowDetail(null)}
+                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                        />
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95, y: 30 }}
+                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                            exit={{ opacity: 0, scale: 0.95, y: 30 }}
+                            className="bg-white rounded-[3.5rem] w-full max-w-xl shadow-2xl overflow-hidden relative z-10"
+                        >
+                            <div className="p-10 bg-slate-900 text-white relative">
+                                <div className="absolute top-0 right-0 p-10 opacity-10">
+                                    <Building className="w-48 h-48" />
+                                </div>
+                                <div className="flex justify-between items-start relative z-10">
+                                    <div className="space-y-6">
+                                        <div className={`w-fit px-4 py-1.5 rounded-xl border-2 text-[10px] font-black uppercase tracking-widest ${getStatusStyle(showDetail.status)} bg-white/5 border-white/20`}>
+                                            {showDetail.status}
+                                        </div>
+                                        <div>
+                                            <h3 className="text-4xl font-black tracking-tighter leading-tight uppercase">{showDetail.name}</h3>
+                                            <p className="text-white/40 text-[11px] font-black uppercase tracking-[0.3em] italic">{showDetail.category} • MASTER PARTNER</p>
+                                        </div>
+                                    </div>
+                                    <button onClick={() => setShowDetail(null)} className="w-12 h-12 flex items-center justify-center bg-white/10 hover:bg-white/20 rounded-2xl transition-all"><X className="w-6 h-6 text-white" /></button>
                                 </div>
                             </div>
                             
-                            <div className="bg-gray-50 rounded-lg p-4 space-y-3">
-                                <div className="flex items-center gap-3">
-                                    <Users className="w-5 h-5 text-gray-400" />
-                                    <div>
-                                        <p className="text-xs text-gray-500">Contacto</p>
-                                        <p className="text-gray-800">{showDetail.contact || 'N/A'}</p>
+                            <div className="p-10 space-y-10">
+                                <div className="grid grid-cols-2 gap-10">
+                                    <div className="space-y-2">
+                                        <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Enlace Principal</p>
+                                        <p className="font-black text-slate-900 text-xl tracking-tight">{showDetail.contact || 'SOPORTE DIRECTO'}</p>
+                                        <p className="text-sm font-bold text-slate-500 italic">Delegado de Cuenta</p>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest">Cartera de Activos</p>
+                                        <p className="font-black text-slate-900 text-xl tracking-tight">{showDetail.productCount || 0} Productos</p>
+                                        <p className="text-sm font-bold text-slate-500 italic">Integración de Stock</p>
                                     </div>
                                 </div>
-                                <div className="flex items-center gap-3">
-                                    <Mail className="w-5 h-5 text-gray-400" />
-                                    <div>
-                                        <p className="text-xs text-gray-500">Email</p>
-                                        <p className="text-gray-800">{showDetail.email}</p>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                    <Phone className="w-5 h-5 text-gray-400" />
-                                    <div>
-                                        <p className="text-xs text-gray-500">Teléfono</p>
-                                        <p className="text-gray-800">{showDetail.phone || 'N/A'}</p>
-                                    </div>
-                                </div>
-                                {showDetail.address && (
-                                    <div className="flex items-center gap-3">
-                                        <MapPin className="w-5 h-5 text-gray-400" />
+
+                                <div className="p-8 bg-slate-50 rounded-[2.5rem] space-y-6 border border-slate-100">
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
+                                            <Mail className="w-5 h-5 text-indigo-500" />
+                                        </div>
                                         <div>
-                                            <p className="text-xs text-gray-500">Dirección</p>
-                                            <p className="text-gray-800">{showDetail.address}</p>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Canal de Comunicación</p>
+                                            <p className="font-black text-slate-900 underline decoration-indigo-500/30 underline-offset-4">{showDetail.email}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
+                                            <Phone className="w-5 h-5 text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Línea de Asistencia</p>
+                                            <p className="font-black text-slate-900">{showDetail.phone || 'COMUNICACIÓN LIMITADA'}</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-5">
+                                        <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center shadow-sm border border-slate-100">
+                                            <MapPin className="w-5 h-5 text-indigo-500" />
+                                        </div>
+                                        <div>
+                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Logística / Hub</p>
+                                            <p className="font-black text-slate-900 truncate">{showDetail.address || 'UBICACIÓN RESERVADA'}</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {showDetail.notes && (
+                                    <div className="space-y-4">
+                                        <p className="text-[11px] font-black text-slate-300 uppercase tracking-widest pl-2">Bitácora de Relación</p>
+                                        <div className="relative">
+                                            <div className="absolute left-0 top-0 bottom-0 w-2 bg-slate-900 rounded-full"></div>
+                                            <p className="text-sm font-bold text-slate-700 leading-relaxed italic pl-8 bg-slate-50 py-6 rounded-r-[2rem]">
+                                                "{showDetail.notes}"
+                                            </p>
                                         </div>
                                     </div>
                                 )}
-                            </div>
-                            
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="bg-purple-50 rounded-lg p-4 text-center">
-                                    <Package className="w-6 h-6 text-purple-600 mx-auto mb-2" />
-                                    <p className="text-2xl font-bold text-purple-700">{showDetail.productCount || 0}</p>
-                                    <p className="text-xs text-purple-600">Productos</p>
+
+                                <div className="flex gap-4 pt-4">
+                                    <motion.button 
+                                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                        onClick={() => { setShowDetail(null); handleOpenForm(showDetail); }}
+                                        className="flex-1 py-5 bg-slate-900 text-white rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] shadow-2xl shadow-slate-200 hover:bg-black transition-all flex items-center justify-center gap-3"
+                                    >
+                                        <Edit2 className="w-5 h-5" /> Editar Proveedor
+                                    </motion.button>
+                                    <motion.button 
+                                        whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+                                        onClick={() => setShowDetail(null)}
+                                        className="flex-1 py-5 bg-slate-100 text-slate-500 rounded-[1.75rem] font-black text-[11px] uppercase tracking-[0.25em] hover:bg-slate-200 transition-all"
+                                    >
+                                        Cerrar Vista
+                                    </motion.button>
                                 </div>
-                                <div className="bg-orange-50 rounded-lg p-4 text-center">
-                                    <DollarSign className="w-6 h-6 text-orange-600 mx-auto mb-2" />
-                                    <p className="text-lg font-bold text-orange-700">{formatPrice(showDetail.totalExpenses || 0)}</p>
-                                    <p className="text-xs text-orange-600">Gastos</p>
-                                </div>
                             </div>
-                            
-                            {showDetail.notes && (
-                                <div className="pt-4 border-t border-gray-100">
-                                    <div className="flex items-center gap-2 text-sm text-gray-500 mb-1">
-                                        <FileText className="w-4 h-4" />
-                                        Notas
-                                    </div>
-                                    <p className="text-gray-700">{showDetail.notes}</p>
-                                </div>
-                            )}
-                            
-                            <div className="pt-4 border-t border-gray-100">
-                                <p className="text-xs text-gray-400">Registrado: {showDetail.createdAt ? new Date(showDetail.createdAt).toLocaleString('es-ES') : 'N/A'}</p>
-                            </div>
-                        </div>
-                        
-                        <div className="p-6 border-t border-gray-100 flex gap-3">
-                            <Button variant="outline" onClick={() => { setShowDetail(null); handleOpenForm(showDetail); }} className="flex-1">
-                                <Edit2 className="w-4 h-4 mr-2" /> Editar
-                            </Button>
-                            <Button onClick={() => setShowDetail(null)} className="flex-1">
-                                Cerrar
-                            </Button>
-                        </div>
+                        </motion.div>
                     </div>
+                )}
+            </PortalWrapper>
+
+            {/* Import Modal */}
+            <PortalWrapper isOpen={showImportModal}>
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/80 backdrop-blur-xl">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden"
+                    >
+                        <div className="p-6 border-b border-slate-100">
+                            <h3 className="font-black text-xl text-slate-900">Importar Proveedores</h3>
+                            <p className="text-sm text-slate-500 mt-1">Carga un archivo Excel con los datos de los proveedores</p>
+                        </div>
+                        <div className="p-6 space-y-4">
+                            <button
+                                onClick={downloadTemplate}
+                                className="w-full p-4 border-2 border-dashed border-slate-200 rounded-2xl hover:border-indigo-300 hover:bg-indigo-50 transition-all flex items-center justify-center gap-3 text-slate-600 hover:text-indigo-600"
+                            >
+                                <Download className="w-5 h-5" />
+                                <span className="font-bold">Descargar Plantilla</span>
+                            </button>
+                            
+                            <div className="relative">
+                                <input
+                                    type="file"
+                                    accept=".xlsx,.xls"
+                                    onChange={handleImport}
+                                    disabled={importing}
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                />
+                                <div className={`w-full p-4 border-2 border-slate-200 rounded-2xl flex items-center justify-center gap-3 ${importing ? 'bg-slate-50 text-slate-400' : 'hover:border-emerald-300 hover:bg-emerald-50 text-slate-600 hover:text-emerald-600'} transition-all`}>
+                                    {importing ? (
+                                        <div className="w-5 h-5 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
+                                    ) : (
+                                        <Upload className="w-5 h-5" />
+                                    )}
+                                    <span className="font-bold">{importing ? 'Importando...' : 'Seleccionar Archivo Excel'}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-slate-100 flex justify-end">
+                            <button 
+                                onClick={() => setShowImportModal(false)}
+                                className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold hover:bg-slate-200 transition-all"
+                            >
+                                Cancelar
+                            </button>
+                        </div>
+                    </motion.div>
                 </div>
-            )}
+            </PortalWrapper>
         </AdminLayout>
     );
 };

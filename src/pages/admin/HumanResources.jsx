@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { hrService } from '../../services/hrService';
-import { Plus, Users, Calculator, Banknote } from 'lucide-react';
+import { Plus, Users, Calculator, Banknote, RefreshCw, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import Button from '../../components/Button';
 import { useShop } from '../../context/ShopContext';
+import { useModal } from '../../context/ModalContext';
 
 const AdminHR = () => {
     const { formatPrice } = useShop();
+    const { showAlert } = useModal();
     const [employees, setEmployees] = useState([]);
     const [payroll, setPayroll] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -15,34 +18,94 @@ const AdminHR = () => {
     // Form State
     const [formData, setFormData] = useState({ name: '', role: '', salary: '' });
 
+    const resetForm = () => {
+        setFormData({ name: '', role: '', salary: '' });
+    };
+
     useEffect(() => {
         fetchData();
     }, []);
 
     const fetchData = async () => {
-        const data = await hrService.getEmployees();
-        setEmployees(data);
-        setLoading(false);
+        try {
+            const data = await hrService.getEmployees();
+            setEmployees(data);
+        } catch (error) {
+            console.error('Error fetching employees:', error);
+            showAlert({ title: 'Error', message: 'Error al cargar empleados', type: 'error' });
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleHire = async (e) => {
         e.preventDefault();
         setLoading(true);
-        await hrService.hireEmployee({
-            ...formData,
-            salary: Number(formData.salary)
-        });
-        setFormData({ name: '', role: '', salary: '' });
-        setShowForm(false);
-        await fetchData();
-        setLoading(false);
+        try {
+            await hrService.hireEmployee({
+                ...formData,
+                salary: Number(formData.salary)
+            });
+            showAlert({ title: 'Éxito', message: 'Empleado contratado correctamente', type: 'success' });
+            resetForm();
+            setShowForm(false);
+            await fetchData();
+        } catch (error) {
+            showAlert({ title: 'Error', message: error.message || 'Error al contratar empleado', type: 'error' });
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleSimulatePayroll = async () => {
         setLoading(true);
-        const data = await hrService.calculatePayroll();
-        setPayroll(data);
-        setLoading(false);
+        try {
+            const data = await hrService.calculatePayroll();
+            setPayroll(data);
+        } catch (error) {
+            showAlert({ title: 'Error', message: error.message || 'Error al calcular nómina', type: 'error' });
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleExportExcel = async () => {
+        try {
+            const data = await hrService.exportEmployees({ format: 'json' });
+            
+            if (!data || data.length === 0) {
+                showAlert({ title: 'Sin Datos', message: 'No hay empleados para exportar', type: 'info' });
+                return;
+            }
+
+            const exportData = data.map(emp => ({
+                'ID': emp.id,
+                'Nombre Completo': emp.name,
+                'Cargo / Puesto': emp.role,
+                'Salario Base': emp.salary,
+                'Estado Contrato': emp.status === 'active' ? 'ACTIVO' : 'INACTIVO',
+                'Fecha Ingreso': new Date(emp.createdAt || emp.hiredAt).toLocaleDateString(),
+                'Departamento': emp.department || 'N/A',
+                'Email': emp.email || 'N/A',
+                'Teléfono': emp.phone || 'N/A'
+            }));
+
+            const worksheet = XLSX.utils.json_to_sheet(exportData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Empleados');
+
+            const wscols = [
+                { wch: 10 }, { wch: 30 }, { wch: 25 }, { wch: 15 }, 
+                { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 30 }, 
+                { wch: 15 }
+            ];
+            worksheet['!cols'] = wscols;
+
+            XLSX.writeFile(workbook, `Nomina_Empleados_${new Date().toISOString().split('T')[0]}.xlsx`);
+        } catch (error) {
+            console.error('Export error:', error);
+            showAlert({ title: 'Error Exportación', message: 'No se pudo generar el reporte de personal', type: 'error' });
+        }
     };
 
     return (
@@ -53,6 +116,9 @@ const AdminHR = () => {
                 <div className="flex justify-between items-center">
                     <p className="text-gray-500">Gestión de talento humano.</p>
                     <div className="flex gap-3">
+                        <Button variant="outline" onClick={handleExportExcel} className="flex items-center gap-2 bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100">
+                            <Download className="w-4 h-4" /> Exportar Excel
+                        </Button>
                         <Button variant="outline" onClick={handleSimulatePayroll} className="flex items-center gap-2">
                             <Calculator className="w-4 h-4" /> Simular Nómina
                         </Button>

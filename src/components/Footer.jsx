@@ -105,7 +105,8 @@ const Footer = () => {
                 >
                     <p>© {new Date().getFullYear()} {settings.businessName || 'La Bodega del Computador'}. Todos los derechos reservados.</p>
                     <div className="flex gap-6 mt-4 md:mt-0 items-center">
-                        <Link to="/tech-login" className="hover:text-black text-xs opacity-50 hover:opacity-100 transition-all">Acceso a soporte técnico</Link>
+                        <Link to="/admin/login" className="text-gray-600 hover:text-indigo-600 font-medium text-xs transition-all">Acceso a empleados</Link>
+                        <Link to="/tech-login" className="text-gray-600 hover:text-indigo-600 font-medium text-xs transition-all">Acceso a soporte técnico</Link>
                         <button onClick={() => openModal('privacy')} className="hover:text-black bg-transparent border-none p-0 text-xs">Privacidad y Habeas Data</button>
                         <button onClick={() => openModal('terms')} className="hover:text-black bg-transparent border-none p-0 text-xs">Términos y Condiciones</button>
                     </div>

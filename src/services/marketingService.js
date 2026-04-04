@@ -1,4 +1,4 @@
-const API_URL = '/api/coupons';
+import { buildApiUrl } from '../config/config';
 
 const getHeaders = () => {
     const token = localStorage.getItem('adminToken');
@@ -10,44 +10,50 @@ const getHeaders = () => {
 
 export const marketingService = {
     getCoupons: async () => {
-        const response = await fetch(API_URL, { headers: getHeaders() });
-        if (!response.ok) throw new Error('Error al cargar cupones');
-        return response.json();
+        try {
+            const response = await fetch(buildApiUrl('/api/coupons'), { headers: getHeaders() });
+            if (!response.ok) throw new Error('Error al cargar cupones');
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.coupons || data.data || []);
+        } catch (error) {
+            console.error('Error fetching coupons:', error);
+            return [];
+        }
     },
 
     createCoupon: async (data) => {
-        const response = await fetch(API_URL, {
+        const response = await fetch(buildApiUrl('/api/coupons'), {
             method: 'POST',
             headers: getHeaders(),
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Error al crear cupón');
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.error || 'Error al crear cupón');
         }
         return response.json();
     },
 
     toggleStatus: async (id) => {
-        const response = await fetch(`${API_URL}/${id}/toggle`, {
+        const response = await fetch(buildApiUrl(`/api/coupons/${id}/toggle`), {
             method: 'PUT',
             headers: getHeaders()
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Error al cambiar estado');
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.error || 'Error al cambiar estado');
         }
         return response.json();
     },
 
     deleteCoupon: async (id) => {
-        const response = await fetch(`${API_URL}/${id}`, {
+        const response = await fetch(buildApiUrl(`/api/coupons/${id}`), {
             method: 'DELETE',
             headers: getHeaders()
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Error al eliminar cupón');
+            const errorBody = await response.json().catch(() => ({}));
+            throw new Error(errorBody.error || 'Error al eliminar cupón');
         }
         return response.json();
     }

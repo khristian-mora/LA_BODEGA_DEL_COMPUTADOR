@@ -41,8 +41,8 @@ export const supplierService = {
             body: JSON.stringify(data)
         });
         if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Error al crear proveedor');
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || errorData.details || 'Error al crear proveedor');
         }
         return response.json();
     },
@@ -81,10 +81,9 @@ export const supplierService = {
         return response.json();
     },
 
-    // Export suppliers to CSV
     exportSuppliers: async (params = {}) => {
         const queryParams = new URLSearchParams();
-        queryParams.append('format', 'csv');
+        queryParams.append('format', params.format || 'json');
         if (params.status) queryParams.append('status', params.status);
         if (params.category) queryParams.append('category', params.category);
 
@@ -92,7 +91,26 @@ export const supplierService = {
             headers: getHeaders()
         });
         if (!response.ok) throw new Error('Error al exportar');
-        return response.text();
+        return params.format === 'csv' ? response.text() : response.json();
+    },
+
+    importSuppliers: async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(buildApiUrl('/api/suppliers/import'), {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Error al importar proveedores');
+        }
+        return response.json();
     }
 };
 

@@ -556,6 +556,11 @@ export const exportReturns = (req, res) => {
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
+        const { format = 'csv' } = req.query;
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
         // Convert to CSV
         const headers = ['RMA Code', 'Cliente', 'Email', 'Orden', 'Producto', 'Cantidad', 'Razón', 'Categoría', 'Estado', 'Monto Reembolso', 'Fecha Creación', 'Fecha Resolución'];
         const csvRows = rows.map(row => [

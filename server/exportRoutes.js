@@ -554,3 +554,28 @@ export const generatePDFReport = (req, res) => {
         doc.end();
     });
 };
+
+// Export All System Data (Backup-style JSON export)
+export const exportAll = (req, res) => {
+    const backup = {
+        timestamp: new Date().toISOString(),
+        tables: {}
+    };
+
+    const tables = ['users', 'products', 'tickets', 'customers', 'orders', 'expenses', 'suppliers', 'coupons', 'employees'];
+    let completed = 0;
+
+    tables.forEach(table => {
+        db.all(`SELECT * FROM ${table}`, [], (err, rows) => {
+            if (!err) {
+                backup.tables[table] = rows;
+            }
+            completed++;
+            if (completed === tables.length) {
+                res.setHeader('Content-Type', 'application/json');
+                res.setHeader('Content-Disposition', `attachment; filename=backup_lbdc_${new Date().toISOString().split('T')[0]}.json`);
+                res.json(backup);
+            }
+        });
+    });
+};

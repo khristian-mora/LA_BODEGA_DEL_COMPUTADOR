@@ -1,485 +1,281 @@
-import { db } from './db.js';
+import { db, logActivity } from './db.js';
 
 // Get all coupons with pagination, filtering, and search
 export const getCoupons = (req, res) => {
-    const { 
-        status, 
-        type,
-        startDate, 
-        endDate,
-        search,
-        page = 1, 
-        limit = 20, 
-        sortBy = 'createdAt', 
-        sortOrder = 'DESC' 
-    } = req.query;
-    
-    // Pagination validation
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
-    const offset = (pageNum - 1) * limitNum;
-    
-    // Validate sort parameters
-    const validSortColumns = ['createdAt', 'code', 'discount', 'uses', 'status', 'expiresAt'];
-    const validSortOrders = ['ASC', 'DESC'];
-    const safeSortBy = validSortColumns.includes(sortBy) ? sortBy : 'createdAt';
-    const safeSortOrder = validSortOrders.includes(sortOrder?.toUpperCase()) ? sortOrder.toUpperCase() : 'DESC';
-    
-    let sql = `
-        SELECT * FROM coupons
-        WHERE 1=1
-    `;
-    
-    let countSql = `
-        SELECT COUNT(*) as total
-        FROM coupons
-        WHERE 1=1
-    `;
-    
+    const { page = 1, limit = 10, search = '', type = '', status = '' } = req.query;
+    const offset = (page - 1) * limit;
+
+    let sql = 'SELECT * FROM coupons WHERE 1=1';
+    let countSql = 'SELECT COUNT(*) as total FROM coupons WHERE 1=1';
     const params = [];
     const countParams = [];
-    
-    // Filter by status
-    if (status) {
-        sql += ' AND status = ?';
-        countSql += ' AND status = ?';
-        params.push(status);
-        countParams.push(status);
+
+    if (search) {
+        const searchPattern = `%${search}%`;
+        sql += ' AND (code LIKE ? OR description LIKE ?)';
+        countSql += ' AND (code LIKE ? OR description LIKE ?)';
+        params.push(searchPattern, searchPattern);
+        countParams.push(searchPattern, searchPattern);
     }
-    
-    // Filter by type
+
     if (type) {
         sql += ' AND type = ?';
         countSql += ' AND type = ?';
         params.push(type);
         countParams.push(type);
     }
-    
-    // Date range filter (based on expiration)
-    if (startDate) {
-        sql += ' AND (expiresAt >= ? OR expiresAt IS NULL)';
-        countSql += ' AND (expiresAt >= ? OR expiresAt IS NULL)';
-        params.push(startDate);
-        countParams.push(startDate);
+
+    if (status) {
+        const now = new Date().toISOString();
+        if (status === 'active') {
+            sql += ' AND status = "active" AND (expiresAt IS NULL OR expiresAt > ?)';
+            countSql += ' AND status = "active" AND (expiresAt IS NULL OR expiresAt > ?)';
+            params.push(now);
+            countParams.push(now);
+        } else if (status === 'expired') {
+            sql += ' AND (status = "inactive" OR (expiresAt IS NOT NULL AND expiresAt <= ?))';
+            countSql += ' AND (status = "inactive" OR (expiresAt IS NOT NULL AND expiresAt <= ?))';
+            params.push(now);
+            countParams.push(now);
+        }
     }
-    if (endDate) {
-        sql += ' AND (expiresAt <= ? OR expiresAt IS NULL)';
-        countSql += ' AND (expiresAt <= ? OR expiresAt IS NULL)';
-        params.push(endDate);
-        countParams.push(endDate);
-    }
-    
-    // Search filter
-    if (search) {
-        sql += ` AND (code LIKE ? OR type LIKE ?)`;
-        countSql += ` AND (code LIKE ? OR type LIKE ?)`;
-        const searchParam = `%${search}%`;
-        params.push(searchParam, searchParam);
-        countParams.push(searchParam, searchParam);
-    }
-    
-    // Get total count
+
+    sql += ' ORDER BY createdAt DESC LIMIT ? OFFSET ?';
+    params.push(parseInt(limit), parseInt(offset));
+
     db.get(countSql, countParams, (err, countResult) => {
         if (err) return res.status(500).json({ error: err.message });
-        
-        const total = countResult.total;
-        const totalPages = Math.ceil(total / limitNum);
-        
-        // Add sorting and pagination
-        sql += ` ORDER BY ${safeSortBy} ${safeSortOrder} LIMIT ? OFFSET ?`;
-        params.push(limitNum, offset);
-        
+
+        const total = countResult?.total || 0;
+
         db.all(sql, params, (err, rows) => {
             if (err) return res.status(500).json({ error: err.message });
-            
+
             res.json({
-                coupons: rows,
+                items: rows,
                 pagination: {
-                    page: pageNum,
-                    limit: limitNum,
+                    page: parseInt(page),
+                    limit: parseInt(limit),
                     total,
-                    totalPages,
-                    hasNext: pageNum < totalPages,
-                    hasPrev: pageNum > 1
+                    totalPages: Math.ceil(total / limit)
                 }
             });
         });
     });
 };
 
-// Get coupon statistics for dashboard
-export const getCouponStats = (req, res) => {
-    const { period = 'month' } = req.query;
-    
-    let periodCondition = '';
-    if (period === 'week') {
-        periodCondition = "AND createdAt >= date('now', '-7 days')";
-    } else if (period === 'month') {
-        periodCondition = "AND createdAt >= date('now', '-30 days')";
-    } else if (period === 'quarter') {
-        periodCondition = "AND createdAt >= date('now', '-90 days')";
-    }
-    
-    // Total coupons and usage
-    const totalSql = `
-        SELECT 
-            COUNT(*) as totalCoupons,
-            SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as activeCoupons,
-            SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END) as expiredCoupons,
-            SUM(uses) as totalUses,
-            SUM(CASE WHEN type = 'percent' THEN discount ELSE 0 END) as totalPercentDiscount,
-            SUM(CASE WHEN type = 'fixed' THEN discount ELSE 0 END) as totalFixedDiscount
-        FROM coupons
-        WHERE 1=1 ${periodCondition}
-    `;
-    
-    // Top performing coupons
-    const topCouponsSql = `
-        SELECT code, discount, type, uses, status, expiresAt
-        FROM coupons
-        WHERE uses > 0 ${periodCondition}
-        ORDER BY uses DESC
-        LIMIT 10
-    `;
-    
-    // Coupons by type distribution
-    const typeDistributionSql = `
-        SELECT type, COUNT(*) as count, SUM(uses) as totalUses
-        FROM coupons
-        WHERE 1=1 ${periodCondition}
-        GROUP BY type
-    `;
-    
-    // Expiring soon (within 7 days)
-    const expiringSoonSql = `
-        SELECT code, discount, type, expiresAt, 
-               JULIANDAY(expiresAt) - JULIANDAY('now') as daysUntilExpiry
-        FROM coupons
-        WHERE status = 'active' 
-          AND expiresAt IS NOT NULL 
-          AND expiresAt BETWEEN datetime('now') AND datetime('now', '+7 days')
-        ORDER BY expiresAt ASC
-    `;
-    
-    // Coupons created by month trend
-    const monthlyTrendSql = `
-        SELECT 
-            strftime('%Y-%m', createdAt) as month,
-            COUNT(*) as couponsCreated,
-            SUM(uses) as totalUses
-        FROM coupons
-        WHERE createdAt >= date('now', '-6 months')
-        GROUP BY strftime('%Y-%m', createdAt)
-        ORDER BY month DESC
-        LIMIT 6
-    `;
-    
-    Promise.all([
-        new Promise((resolve, reject) => {
-            db.get(totalSql, [], (err, row) => {
-                if (err) reject(err);
-                else resolve(row);
-            });
-        }),
-        new Promise((resolve, reject) => {
-            db.all(topCouponsSql, [], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        }),
-        new Promise((resolve, reject) => {
-            db.all(typeDistributionSql, [], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        }),
-        new Promise((resolve, reject) => {
-            db.all(expiringSoonSql, [], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        }),
-        new Promise((resolve, reject) => {
-            db.all(monthlyTrendSql, [], (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows);
-            });
-        })
-    ]).then(([summary, topCoupons, typeDistribution, expiringSoon, monthlyTrend]) => {
-        res.json({
-            summary: summary || {
-                totalCoupons: 0,
-                activeCoupons: 0,
-                expiredCoupons: 0,
-                totalUses: 0,
-                totalPercentDiscount: 0,
-                totalFixedDiscount: 0
-            },
-            topCoupons,
-            typeDistribution,
-            expiringSoon,
-            monthlyTrend
-        });
-    }).catch(err => {
-        res.status(500).json({ error: err.message });
-    });
-};
-
-// Get single coupon
-export const getCoupon = (req, res) => {
-    const { id } = req.params;
-    db.get('SELECT * FROM coupons WHERE id = ?', [id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: 'Cupón no encontrado' });
-        res.json(row);
-    });
-};
-
-// Create coupon with enhanced validation
+// Create a new coupon
 export const createCoupon = (req, res) => {
-    const { code, discount, type, expiresAt, minPurchase, maxUses, description } = req.body;
-    
-    // Enhanced validation
-    if (!code || code.trim().length < 3) {
-        return res.status(400).json({ error: 'El código debe tener al menos 3 caracteres' });
-    }
-    
-    if (!discount || discount <= 0) {
-        return res.status(400).json({ error: 'El descuento debe ser mayor a 0' });
-    }
-    
-    if (type === 'percent' && discount > 100) {
-        return res.status(400).json({ error: 'El descuento porcentual no puede ser mayor a 100%' });
-    }
-    
-    if (type && !['percent', 'fixed'].includes(type)) {
-        return res.status(400).json({ error: 'El tipo debe ser "percent" o "fixed"' });
-    }
-    
-    if (expiresAt && new Date(expiresAt) < new Date()) {
-        return res.status(400).json({ error: 'La fecha de expiración no puede ser en el pasado' });
-    }
-    
-    if (maxUses && maxUses <= 0) {
-        return res.status(400).json({ error: 'El máximo de usos debe ser mayor a 0' });
+    const { code, type, discount, minPurchase, expiresAt, description, maxUses } = req.body;
+
+    if (!code || !type || discount === undefined) {
+        return res.status(400).json({ error: 'Código, tipo y descuento son requeridos' });
     }
 
-    const sql = `INSERT INTO coupons (code, discount, type, uses, status, expiresAt, minPurchase, maxUses, description, createdAt)
-                 VALUES (?, ?, ?, 0, 'active', ?, ?, ?, ?, datetime('now'))`;
-    const params = [
-        code.toUpperCase().trim(), 
-        discount, 
-        type || 'percent', 
-        expiresAt || null,
-        minPurchase || 0,
-        maxUses || null,
-        description || null
-    ];
+    const sql = `
+        INSERT INTO coupons (code, type, discount, minPurchase, expiresAt, description, maxUses, status, createdAt)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)
+    `;
 
-    db.run(sql, params, function(err) {
+    const now = new Date().toISOString();
+
+    db.run(sql, [code.toUpperCase(), type, discount, minPurchase, expiresAt, description, maxUses, now], function(err) {
         if (err) {
             if (err.message.includes('UNIQUE')) {
-                return res.status(400).json({ error: 'Ya existe un cupón con ese código' });
+                return res.status(400).json({ error: 'Este código de cupón ya existe' });
             }
             return res.status(500).json({ error: err.message });
         }
-        
-        // Log activity
-        logActivity(req.user.id, 'CREATE', 'coupons', `Cupón creado: ${code.toUpperCase()}`);
-        
-        res.status(201).json({ 
-            id: this.lastID, 
-            code: code.toUpperCase().trim(), 
-            discount, 
-            type: type || 'percent',
-            uses: 0,
-            status: 'active',
-            expiresAt: expiresAt || null,
-            minPurchase: minPurchase || 0,
-            maxUses: maxUses || null,
-            description: description || null
+
+        logActivity({
+            userId: req.user.id,
+            action: 'CREATE',
+            module: 'coupons',
+            entityType: 'coupon',
+            entityId: this.lastID,
+            newValue: { code, type, discount },
+            req
         });
+
+        res.status(201).json({ id: this.lastID, message: 'Cupón creado correctamente' });
     });
 };
 
-// Update coupon
+// Update a coupon
 export const updateCoupon = (req, res) => {
     const { id } = req.params;
-    const { discount, type, expiresAt, minPurchase, maxUses, description, status } = req.body;
-    
-    // Check if coupon exists
-    db.get('SELECT * FROM coupons WHERE id = ?', [id], (err, existing) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!existing) return res.status(404).json({ error: 'Cupón no encontrado' });
-        
-        // Build dynamic update
-        let updates = [];
-        let params = [];
-        
-        if (discount !== undefined) {
-            if (discount <= 0) return res.status(400).json({ error: 'El descuento debe ser mayor a 0' });
-            if (type === 'percent' && discount > 100) {
-                return res.status(400).json({ error: 'El descuento porcentual no puede ser mayor a 100%' });
-            }
-            updates.push('discount = ?');
-            params.push(discount);
-        }
-        
-        if (type !== undefined) {
-            if (!['percent', 'fixed'].includes(type)) {
-                return res.status(400).json({ error: 'El tipo debe ser "percent" o "fixed"' });
-            }
-            updates.push('type = ?');
-            params.push(type);
-        }
-        
-        if (expiresAt !== undefined) {
-            if (expiresAt && new Date(expiresAt) < new Date()) {
-                return res.status(400).json({ error: 'La fecha de expiración no puede ser en el pasado' });
-            }
-            updates.push('expiresAt = ?');
-            params.push(expiresAt || null);
-        }
-        
-        if (minPurchase !== undefined) {
-            updates.push('minPurchase = ?');
-            params.push(minPurchase);
-        }
-        
-        if (maxUses !== undefined) {
-            if (maxUses && maxUses <= 0) {
-                return res.status(400).json({ error: 'El máximo de usos debe ser mayor a 0' });
-            }
-            updates.push('maxUses = ?');
-            params.push(maxUses);
-        }
-        
-        if (description !== undefined) {
-            updates.push('description = ?');
-            params.push(description);
-        }
-        
-        if (status !== undefined) {
-            if (!['active', 'expired', 'paused'].includes(status)) {
-                return res.status(400).json({ error: 'El estado debe ser "active", "expired" o "paused"' });
-            }
-            updates.push('status = ?');
-            params.push(status);
-        }
-        
-        if (updates.length === 0) {
-            return res.status(400).json({ error: 'No hay campos para actualizar' });
-        }
-        
-        updates.push('updatedAt = datetime("now")');
-        params.push(id);
-        
-        const sql = `UPDATE coupons SET ${updates.join(', ')} WHERE id = ?`;
-        
-        db.run(sql, params, function(err) {
+    const { type, discount, minPurchase, expiresAt, description, maxUses, status } = req.body;
+
+    db.get('SELECT * FROM coupons WHERE id = ?', [id], (err, oldCoupon) => {
+        if (err || !oldCoupon) return res.status(404).json({ error: 'Cupón no encontrado' });
+
+        const sql = `
+            UPDATE coupons 
+            SET type = ?, discount = ?, minPurchase = ?, expiresAt = ?, description = ?, maxUses = ?, status = ?
+            WHERE id = ?
+        `;
+
+        db.run(sql, [type, discount, minPurchase, expiresAt, description, maxUses, status, id], function(err) {
             if (err) return res.status(500).json({ error: err.message });
-            if (this.changes === 0) return res.status(404).json({ error: 'Cupón no encontrado' });
-            
-            // Log activity
-            logActivity(req.user.id, 'UPDATE', 'coupons', `Cupón actualizado: ${existing.code}`);
-            
-            res.json({ success: true, id: parseInt(id), ...req.body });
+
+            logActivity({
+                userId: req.user.id,
+                action: 'UPDATE',
+                module: 'coupons',
+                entityType: 'coupon',
+                entityId: id,
+                oldValue: oldCoupon,
+                newValue: { type, discount, status },
+                req
+            });
+
+            res.json({ message: 'Cupón actualizado correctamente' });
         });
     });
 };
 
-// Toggle coupon status
-export const toggleCouponStatus = (req, res) => {
+// Delete a coupon
+export const deleteCoupon = (req, res) => {
     const { id } = req.params;
-    
-    db.get('SELECT status, code FROM coupons WHERE id = ?', [id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: 'Cupón no encontrado' });
-        
-        const newStatus = row.status === 'active' ? 'expired' : 'active';
-        db.run('UPDATE coupons SET status = ?, updatedAt = datetime("now") WHERE id = ?', [newStatus, id], function(err) {
+
+    db.get('SELECT * FROM coupons WHERE id = ?', [id], (err, oldCoupon) => {
+        if (err || !oldCoupon) return res.status(404).json({ error: 'Cupón no encontrado' });
+
+        db.run('DELETE FROM coupons WHERE id = ?', [id], (err) => {
             if (err) return res.status(500).json({ error: err.message });
-            
-            // Log activity
-            logActivity(req.user.id, 'TOGGLE_STATUS', 'coupons', `Cupón ${row.code} cambiado a ${newStatus}`);
-            
-            res.json({ success: true, status: newStatus });
+
+            logActivity({
+                userId: req.user.id,
+                action: 'DELETE',
+                module: 'coupons',
+                entityType: 'coupon',
+                entityId: id,
+                oldValue: oldCoupon,
+                req
+            });
+
+            res.json({ message: 'Cupón eliminado correctamente' });
         });
     });
 };
 
-// Export coupons to CSV
+// Get coupon by code (for checkout)
+export const getCouponByCode = (req, res) => {
+    const { code } = req.params;
+    const now = new Date().toISOString();
+
+    const sql = `
+        SELECT * FROM coupons 
+        WHERE code = ? AND status = 'active' 
+        AND (expiresAt IS NULL OR expiresAt > ?)
+    `;
+
+    db.get(sql, [code.toUpperCase(), now], (err, coupon) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!coupon) return res.status(404).json({ error: 'Cupón no válido o expirado' });
+
+        // Check usage limit
+        if (coupon.maxUses && coupon.uses >= coupon.maxUses) {
+            return res.status(400).json({ error: 'Este cupón ha alcanzado su límite de uso' });
+        }
+
+        res.json(coupon);
+    });
+};
+
+// Get Stats
+export const getCouponStats = (req, res) => {
+    const now = new Date().toISOString();
+    const sevenDaysLater = new Date();
+    sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+
+    db.get('SELECT COUNT(*) as total FROM coupons', [], (err, result) => {
+        const total = result?.total || 0;
+
+        db.get('SELECT COUNT(*) as active FROM coupons WHERE status = "active" AND (expiresAt IS NULL OR expiresAt > ?)', [now], (err, result) => {
+            const active = result?.active || 0;
+
+            db.get('SELECT SUM(uses) as totalUsed FROM coupons', [], (err, result) => {
+                const totalUsed = result?.totalUsed || 0;
+
+                db.all('SELECT type, COUNT(*) as count FROM coupons GROUP BY type', [], (err, byType) => {
+                    // Get expiring soon (next 7 days)
+                    db.all('SELECT code, discount, type, expiresAt FROM coupons WHERE status = "active" AND expiresAt IS NOT NULL AND expiresAt BETWEEN ? AND ? ORDER BY expiresAt ASC', 
+                        [now, sevenDaysLater.toISOString()], (err, expiringRows) => {
+                        
+                        const expiringSoon = expiringRows ? expiringRows.map(row => ({
+                            code: row.code,
+                            discount: row.discount,
+                            type: row.type,
+                            daysUntilExpiry: Math.ceil((new Date(row.expiresAt) - new Date(now)) / (1000 * 60 * 60 * 24))
+                        })) : [];
+
+                        // Get top used coupons
+                        db.all('SELECT code, discount, type, uses FROM coupons WHERE uses > 0 ORDER BY uses DESC LIMIT 5', [], (err, topRows) => {
+                            const topCoupons = topRows || [];
+
+                            res.json({
+                                summary: {
+                                    totalCoupons: total,
+                                    activeCoupons: active,
+                                    totalUses: totalUsed
+                                },
+                                expiringSoon,
+                                topCoupons,
+                                byType: byType || []
+                            });
+                        });
+                    });
+                });
+            });
+        });
+    });
+};
+
+// Export Coupons
 export const exportCoupons = (req, res) => {
-    const { status, type } = req.query;
+    const { status, type, format = 'json' } = req.query;
     
     let sql = 'SELECT * FROM coupons WHERE 1=1';
     const params = [];
-    
+
     if (status) {
         sql += ' AND status = ?';
         params.push(status);
     }
-    
     if (type) {
         sql += ' AND type = ?';
         params.push(type);
     }
-    
+
     sql += ' ORDER BY createdAt DESC';
-    
+
     db.all(sql, params, (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
+        if (format === 'json') {
+            return res.json(rows);
+        }
+
         // Convert to CSV
-        const headers = ['ID', 'Código', 'Descuento', 'Tipo', 'Usos', 'Estado', 'Fecha Expiración', 'Compra Mín', 'Máx Usos', 'Descripción', 'Creado'];
+        const headers = ['ID', 'Código', 'Tipo', 'Descuento', 'Compra Mínima', 'Expira', 'Descripción', 'Usos Máximos', 'Usos Actuales', 'Estado'];
         const csvRows = rows.map(row => [
             row.id,
             row.code,
+            row.type,
             row.discount,
-            row.type === 'percent' ? 'Porcentaje' : 'Fijo',
-            row.uses,
-            row.status === 'active' ? 'Activo' : row.status === 'expired' ? 'Expirado' : 'Pausado',
-            row.expiresAt || 'Sin expiración',
             row.minPurchase || 0,
-            row.maxUses || 'Ilimitado',
-            row.description || '',
-            row.createdAt
+            row.expiresAt || 'Nunca',
+            `"${(row.description || '').replace(/"/g, '""')}"`,
+            row.maxUses || '∞',
+            row.uses || 0,
+            row.status
         ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
         
         const csv = [headers.join(','), ...csvRows].join('\n');
         
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename=cupones_export.csv');
-        res.send('\ufeff' + csv); // BOM for Excel UTF-8
-    });
-};
-
-// Delete coupon
-export const deleteCoupon = (req, res) => {
-    const { id } = req.params;
-    
-    // Get coupon info before deletion for logging
-    db.get('SELECT code FROM coupons WHERE id = ?', [id], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: 'Cupón no encontrado' });
-        
-        db.run('DELETE FROM coupons WHERE id = ?', [id], function(err) {
-            if (err) return res.status(500).json({ error: err.message });
-            if (this.changes === 0) return res.status(404).json({ error: 'Cupón no encontrado' });
-            
-            // Log activity
-            logActivity(req.user.id, 'DELETE', 'coupons', `Cupón eliminado: ${row.code}`);
-            
-            res.json({ success: true });
-        });
-    });
-};
-
-// Helper function to log activity
-const logActivity = (userId, action, module, details) => {
-    const timestamp = new Date().toISOString();
-    const sql = `INSERT INTO user_activity_log (userId, action, module, details, timestamp) VALUES (?, ?, ?, ?, ?)`;
-    db.run(sql, [userId, action, module, details, timestamp], (err) => {
-        if (err) console.error('[ACTIVITY LOG] Error:', err.message);
+        res.send('\ufeff' + csv);
     });
 };

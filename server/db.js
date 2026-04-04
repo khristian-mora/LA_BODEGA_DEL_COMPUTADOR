@@ -78,6 +78,12 @@ if (process.env.DB_HOST) {
             console.error('Error opening database', err.message);
         } else {
             console.log('Connected to the SQLite database.');
+            
+            // Performance Tuning for Better Concurrency
+            db.run('PRAGMA journal_mode = WAL');
+            db.run('PRAGMA synchronous = NORMAL');
+            db.run('PRAGMA busy_timeout = 5000');
+            
             initDb();
         }
     });
@@ -112,7 +118,7 @@ const redactSensitive = (data) => {
  * Centraralized Audit Logging
  * @param {Object} data - { userId, action, module, entityType, entityId, oldValue, newValue, req }
  */
-export const logActivity = (data) => {
+const logActivity = (data) => {
     const { userId, action, module, entityType, entityId, oldValue, newValue, req } = data;
     const ipAddress = req?.ip || (req?.headers ? (req?.headers['x-forwarded-for'] || 'unknown') : 'unknown');
     const userAgent = req?.headers ? (req?.headers['user-agent'] || 'unknown') : 'unknown';
@@ -137,7 +143,7 @@ export const logActivity = (data) => {
     });
 };
 
-export { db, dbPath };
+
 
 function initDb() {
     db.serialize(() => {
@@ -153,18 +159,24 @@ function initDb() {
         supplierEmail TEXT,
         description TEXT,
         featured INTEGER DEFAULT 0,
-        specs TEXT
+        specs TEXT,
+        warrantyMonths INTEGER DEFAULT 12
     )`, (err) => { if (err) console.error('[DB] Error creating products table:', err.message); });
 
         db.run(`CREATE TABLE IF NOT EXISTS tickets(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         clientName TEXT,
         clientPhone TEXT,
+        clientAddress TEXT,
+        clientIdNumber TEXT,
+        orderNumber TEXT UNIQUE,
+        intakeDate TEXT,
         deviceType TEXT,
         brand TEXT,
         model TEXT,
         serial TEXT,
         issueDescription TEXT,
+        deviceConditions TEXT,
         status TEXT DEFAULT 'RECEIVED',
         diagnosis TEXT,
         estimatedCost INTEGER,
@@ -175,12 +187,23 @@ function initDb() {
         findings TEXT,
         recommendations TEXT,
         assignedTo INTEGER,
+        customerId INTEGER,
         createdAt TEXT,
         updatedAt TEXT
     )`, (err) => {
             if (!err) {
                 // Ignore error if column already exists (migration safety)
                 db.run('ALTER TABLE tickets ADD COLUMN assignedTo INTEGER', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN customerId INTEGER', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN clientEmail TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN clientAddress TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN clientIdNumber TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN orderNumber TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN intakeDate TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN deviceConditions TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN timeline TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN damagePhotos TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN laborCost INTEGER DEFAULT 0', () => {});
             }
         });
 
@@ -209,6 +232,15 @@ function initDb() {
         FOREIGN KEY (userId) REFERENCES users(id)
     )`);
 
+        // Ticket Evidence (Base64 Photos)
+        db.run(`CREATE TABLE IF NOT EXISTS ticket_evidence(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER NOT NULL,
+        photo_data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+    )`);
+
         // Customers (CRM)
         db.run(`CREATE TABLE IF NOT EXISTS customers(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,12 +248,27 @@ function initDb() {
         email TEXT,
         phone TEXT,
         address TEXT,
+        city TEXT,
+        department TEXT,
         idNumber TEXT,
         customerType TEXT DEFAULT 'Regular',
         notes TEXT,
+        status TEXT DEFAULT 'active',
+        birthday TEXT,
+        totalSpent REAL DEFAULT 0,
+        lastPurchaseDate TEXT,
         createdAt TEXT,
         updatedAt TEXT
-    )`);
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE customers ADD COLUMN status TEXT DEFAULT "active"', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN birthday TEXT', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN totalSpent REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN lastPurchaseDate TEXT', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN city TEXT', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN department TEXT', () => {});
+            }
+        });
 
         // Appointments
         db.run(`CREATE TABLE IF NOT EXISTS appointments(
@@ -344,22 +391,44 @@ function initDb() {
         phone TEXT,
         category TEXT,
         notes TEXT,
+        website TEXT,
+        taxId TEXT,
+        paymentTerms TEXT,
+        address TEXT,
         status TEXT DEFAULT 'active',
         createdAt TEXT,
         updatedAt TEXT
-    )`);
+    )`, (err) => {
+            if (!err) {
+                // Ensure migration columns exist
+                db.run('ALTER TABLE suppliers ADD COLUMN website TEXT', () => {});
+                db.run('ALTER TABLE suppliers ADD COLUMN taxId TEXT', () => {});
+                db.run('ALTER TABLE suppliers ADD COLUMN paymentTerms TEXT', () => {});
+                db.run('ALTER TABLE suppliers ADD COLUMN address TEXT', () => {});
+            }
+        });
 
         // Coupons (Marketing)
         db.run(`CREATE TABLE IF NOT EXISTS coupons(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         code TEXT UNIQUE NOT NULL,
-        discount INTEGER NOT NULL,
+        discount REAL NOT NULL,
         type TEXT DEFAULT 'percent',
-        uses INTEGER DEFAULT 0,
         status TEXT DEFAULT 'active',
         expiresAt TEXT,
+        minPurchase REAL DEFAULT 0,
+        maxUses INTEGER,
+        uses INTEGER DEFAULT 0,
+        description TEXT,
         createdAt TEXT
-    )`);
+    )`, (err) => {
+            if (!err) {
+                // Migrations for existing tables
+                db.run('ALTER TABLE coupons ADD COLUMN minPurchase REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE coupons ADD COLUMN maxUses INTEGER', () => {});
+                db.run('ALTER TABLE coupons ADD COLUMN description TEXT', () => {});
+            }
+        });
 
         // Employees (HR)
         db.run(`CREATE TABLE IF NOT EXISTS employees(
@@ -367,7 +436,11 @@ function initDb() {
         employeeCode TEXT UNIQUE,
         name TEXT NOT NULL,
         role TEXT,
+        position TEXT,
+        department TEXT,
         salary INTEGER,
+        hourlyRate INTEGER,
+        benefits TEXT,
         hireDate TEXT,
         status TEXT DEFAULT 'Active',
         phone TEXT,
@@ -377,7 +450,14 @@ function initDb() {
         notes TEXT,
         createdAt TEXT,
         updatedAt TEXT
-    )`);
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE employees ADD COLUMN position TEXT', () => {});
+                db.run('ALTER TABLE employees ADD COLUMN department TEXT', () => {});
+                db.run('ALTER TABLE employees ADD COLUMN hourlyRate INTEGER', () => {});
+                db.run('ALTER TABLE employees ADD COLUMN benefits TEXT', () => {});
+            }
+        });
 
         // Employee Attendance
         db.run(`CREATE TABLE IF NOT EXISTS attendance(
@@ -387,10 +467,23 @@ function initDb() {
         checkIn TEXT,
         checkOut TEXT,
         status TEXT DEFAULT 'present',
+        overtimeHours REAL DEFAULT 0,
+        extraNightHours REAL DEFAULT 0,
+        sundayHolidayHours REAL DEFAULT 0,
+        sundayHolidayNightHours REAL DEFAULT 0,
         notes TEXT,
         createdAt TEXT,
+        updatedAt TEXT,
         FOREIGN KEY (employeeId) REFERENCES employees(id)
-    )`);
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE attendance ADD COLUMN overtimeHours REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE attendance ADD COLUMN extraNightHours REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE attendance ADD COLUMN sundayHolidayHours REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE attendance ADD COLUMN sundayHolidayNightHours REAL DEFAULT 0', () => {});
+                db.run('ALTER TABLE attendance ADD COLUMN updatedAt TEXT', () => {});
+            }
+        });
 
         // Employee Leave Requests
         db.run(`CREATE TABLE IF NOT EXISTS leave(
@@ -459,7 +552,6 @@ function initDb() {
         createdAt TEXT
     )`);
 
-        // Audit Logs (for comprehensive audit system)
         db.run(`CREATE TABLE IF NOT EXISTS audit_logs(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         userId INTEGER,
@@ -475,5 +567,29 @@ function initDb() {
         FOREIGN KEY (userId) REFERENCES users(id)
     )`);
 
+    db.run(`CREATE TABLE IF NOT EXISTS user_carts(
+        userId INTEGER NOT NULL,
+        productId INTEGER NOT NULL,
+        quantity INTEGER NOT NULL,
+        updatedAt TEXT,
+        PRIMARY KEY (userId, productId),
+        FOREIGN KEY (userId) REFERENCES users(id),
+        FOREIGN KEY (productId) REFERENCES products(id)
+    )`);
+
+        // Performance Indexes
+        db.run('CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_audit_logs_userId ON audit_logs(userId)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_tickets_customerId ON tickets(customerId)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_customers_idNumber ON customers(idNumber)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_order_items_orderId ON order_items(orderId)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_products_category ON products(category)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_products_name ON products(name)', () => {});
+        db.run('CREATE INDEX IF NOT EXISTS idx_user_carts_userId ON user_carts(userId)', () => {});
+
     });
 }
+
+export { db, dbPath, redactSensitive, logActivity };
+export default db;

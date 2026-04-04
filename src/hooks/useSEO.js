@@ -77,13 +77,17 @@ const useSEO = ({
         const SCRIPT_ID = 'seo-json-ld-dynamic';
         let scriptEl = document.getElementById(SCRIPT_ID);
         if (jsonLd) {
+            const newContent = JSON.stringify(jsonLd);
             if (!scriptEl) {
                 scriptEl = document.createElement('script');
                 scriptEl.id = SCRIPT_ID;
                 scriptEl.type = 'application/ld+json';
+                scriptEl.textContent = newContent;
                 document.head.appendChild(scriptEl);
+            } else if (scriptEl.textContent !== newContent) {
+                // Solo actualizar si el contenido es realmente diferente
+                scriptEl.textContent = newContent;
             }
-            scriptEl.textContent = JSON.stringify(jsonLd);
         } else if (scriptEl) {
             scriptEl.remove();
         }

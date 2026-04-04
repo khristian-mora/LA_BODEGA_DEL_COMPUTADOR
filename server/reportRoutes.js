@@ -359,13 +359,35 @@ export const getTopProducts = (req, res) => {
 
 // Get appointment statistics with validation
 export const getAppointmentStats = (req, res) => {
-    const { startDate, endDate } = req.query;
+    let { startDate, endDate, period = 'month' } = req.query;
     
-    // Validate dates
+    // Auto-calculate dates if missing
     if (!startDate || !endDate) {
-        return res.status(400).json({ error: 'Se requieren startDate y endDate' });
+        const end = new Date();
+        const start = new Date();
+        
+        switch (period) {
+            case 'week':
+                start.setDate(end.getDate() - 7);
+                break;
+            case 'month':
+                start.setMonth(end.getMonth() - 1);
+                break;
+            case 'quarter':
+                start.setMonth(end.getMonth() - 3);
+                break;
+            case 'year':
+                start.setFullYear(end.getFullYear() - 1);
+                break;
+            default:
+                start.setMonth(end.getMonth() - 1); // Default to month
+        }
+        
+        startDate = start.toISOString().split('T')[0];
+        endDate = end.toISOString().split('T')[0];
     }
     
+    // Validate dates if they were provided or calculated
     const dateValidation = validators.isValidDate(startDate, 'startDate');
     if (!dateValidation.valid) {
         return res.status(400).json({ error: dateValidation.message });

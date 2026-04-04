@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
-import Layout from '../layouts/Layout';
 import Button from '../components/Button';
-import { Lock, Eye, EyeOff, CheckCircle } from 'lucide-react';
+import { Lock, Eye, EyeOff, CheckCircle, Monitor } from 'lucide-react';
+import { motion } from 'framer-motion';
 
 const ResetPassword = () => {
     const [searchParams] = useSearchParams();
-    const _navigate = useNavigate();
+    const navigate = useNavigate();
     const token = searchParams.get('token');
 
     const [password, setPassword] = useState('');
@@ -49,91 +49,111 @@ const ResetPassword = () => {
 
     if (!token) {
         return (
-            <Layout>
-                <div className="min-h-[80vh] flex items-center justify-center p-4">
-                    <div className="text-center">
-                        <h2 className="text-2xl font-bold mb-4">Enlace no válido</h2>
-                        <Link to="/forgot-password"><Button>Solicitar nuevo enlace</Button></Link>
-                    </div>
+            <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+                <div className="bg-white p-12 rounded-3xl shadow-xl text-center max-w-sm w-full">
+                    <h2 className="text-2xl font-bold mb-4">Enlace no válido</h2>
+                    <p className="text-slate-500 mb-8">El token de recuperación falta o no es correcto.</p>
+                    <Button onClick={() => navigate('/forgot-password')} className="w-full py-4 font-bold">Solicitar Nuevo Enlace</Button>
                 </div>
-            </Layout>
+            </div>
         );
     }
 
     return (
-        <Layout>
-            <div className="min-h-[80vh] flex items-center justify-center px-4 py-20 bg-gray-50">
-                <div className="max-w-md w-full bg-white rounded-3xl shadow-xl p-8 md:p-12 animate-fade-in-up">
+        <div className="min-h-screen flex bg-white">
+            {/* Left Side */}
+            <div className="hidden lg:flex lg:w-1/2 relative overflow-hidden">
+                <img 
+                    src="https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1920&q=80" 
+                    alt="Cybersecurity"
+                    className="absolute inset-0 w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-gradient-to-br from-indigo-900/90 via-slate-900/80 to-black z-10"></div>
+                <div className="relative z-20 p-12 text-white flex flex-col justify-between w-full">
+                    <Link to="/" className="flex items-center gap-3">
+                        <Monitor className="w-10 h-10" />
+                        <span className="text-xl font-bold tracking-tighter uppercase">La Bodega del Computador</span>
+                    </Link>
+                    <div className="max-w-md">
+                        <h1 className="text-5xl font-black mb-6 leading-tight">Nueva <br/> Identidad</h1>
+                        <p className="text-lg text-slate-300">Elige una contraseña robusta para proteger tu cuenta y tus datos personales.</p>
+                    </div>
+                    <p className="text-sm text-slate-500">© 2025 LBDC. Seguridad avanzada.</p>
+                </div>
+            </div>
 
+            {/* Right Side */}
+            <div className="w-full lg:w-1/2 flex items-center justify-center p-8 sm:p-16 bg-white overflow-y-auto">
+                <div className="w-full max-w-md space-y-8 animate-fade-in-up">
                     {!submitted ? (
                         <>
-                            <div className="text-center mb-8">
-                                <h2 className="text-4xl font-black mb-2">Nueva Contraseña</h2>
-                                <p className="text-gray-500">Elige una contraseña segura que no uses en otros sitios.</p>
+                            <div className="space-y-2">
+                                <h2 className="text-4xl font-black text-slate-900">Restablecer</h2>
+                                <p className="text-slate-500">Define tu nueva contraseña de acceso.</p>
                             </div>
 
                             <form onSubmit={handleSubmit} className="space-y-6">
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Nueva Contraseña</label>
-                                    <div className="relative">
-                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                                        <input
-                                            type={showPassword ? 'text' : 'password'}
-                                            required
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                            className="w-full pl-10 pr-12 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:outline-none transition-all"
-                                            placeholder="••••••••"
-                                        />
-                                        <button
-                                            type="button"
-                                            onClick={() => setShowPassword(!showPassword)}
-                                            className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-black transition-colors"
-                                        >
-                                            {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                                        </button>
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700">Nueva Contraseña</label>
+                                        <div className="relative group">
+                                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                                            <input
+                                                type={showPassword ? 'text' : 'password'}
+                                                required
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                                className="w-full pl-12 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all"
+                                                placeholder="••••••••"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => setShowPassword(!showPassword)}
+                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-900 transition-colors"
+                                            >
+                                                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-sm font-bold text-slate-700">Confirmar Contraseña</label>
+                                        <div className="relative group">
+                                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+                                            <input
+                                                type={showPassword ? 'text' : 'password'}
+                                                required
+                                                value={confirmPassword}
+                                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                                className="w-full pl-12 pr-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-600 outline-none transition-all"
+                                                placeholder="••••••••"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div>
-                                    <label className="block text-sm font-bold text-gray-700 mb-2">Confirmar Contraseña</label>
-                                    <div className="relative">
-                                        <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                                        <input
-                                            type={showPassword ? 'text' : 'password'}
-                                            required
-                                            value={confirmPassword}
-                                            onChange={(e) => setConfirmPassword(e.target.value)}
-                                            className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl focus:ring-2 focus:ring-black focus:outline-none transition-all"
-                                            placeholder="••••••••"
-                                        />
-                                    </div>
-                                </div>
+                                {error && <p className="p-4 bg-red-50 border border-red-100 text-red-600 rounded-xl text-sm font-medium">{error}</p>}
 
-                                {error && <p className="text-red-500 text-sm font-medium">{error}</p>}
-
-                                <Button
-                                    type="submit"
-                                    disabled={loading}
-                                    className="w-full py-4 text-lg"
-                                >
+                                <Button disabled={loading} className="w-full py-4 text-lg font-bold">
                                     {loading ? 'Guardando...' : 'Cambiar Contraseña'}
                                 </Button>
                             </form>
                         </>
                     ) : (
-                        <div className="text-center py-8">
-                            <CheckCircle className="w-20 h-20 text-green-500 mx-auto mb-6 animate-bounce-slow" />
-                            <h2 className="text-3xl font-black mb-4">¡Actualizada!</h2>
-                            <p className="text-gray-500 mb-8">Tu contraseña ha sido cambiada con éxito. Ya puedes iniciar sesión.</p>
-                            <Link to="/login">
-                                <Button className="w-full py-4 text-lg">Iniciar Sesión Ahora</Button>
+                        <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="text-center space-y-6">
+                            <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto">
+                                <CheckCircle className="w-12 h-12 text-blue-600" />
+                            </div>
+                            <h2 className="text-3xl font-black text-slate-900">¡Contraseña Lista!</h2>
+                            <p className="text-slate-500">Tu acceso ha sido restablecido con éxito. Ya puedes entrar a tu cuenta.</p>
+                            <Link to="/login" className="block">
+                                <Button className="w-full py-4 font-bold">Iniciar Sesión e Ir al Perfil</Button>
                             </Link>
-                        </div>
+                        </motion.div>
                     )}
                 </div>
             </div>
-        </Layout>
+        </div>
     );
 };
 

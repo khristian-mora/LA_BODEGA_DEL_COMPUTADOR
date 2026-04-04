@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { Users as UsersIcon, Plus, Edit2, Trash2, Shield, Eye, EyeOff, Search, X } from 'lucide-react';
 import Button from '../../components/Button';
-import { API_CONFIG } from '../../config/config';
+import { buildApiUrl, API_CONFIG } from '../../config/config';
 import { useModal } from '../../context/ModalContext';
+import PortalWrapper from '../../components/PortalWrapper';
 
 const AdminUsers = () => {
     const { showConfirm, showAlert } = useModal();
@@ -13,16 +14,26 @@ const AdminUsers = () => {
     const [editingUser, setEditingUser] = useState(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [showPassword, setShowPassword] = useState(false);
+    const [showInactive, setShowInactive] = useState(false);
+    const [currentPage, setCurrentPage] = useState(1);
+    const USERS_PER_PAGE = 20;
 
     const [formData, setFormData] = useState({
         name: '', email: '', password: '', role: 'admin', status: 'active'
     });
 
+    const resetForm = () => {
+        setFormData({
+            name: '', email: '', password: '', role: 'admin', status: 'active'
+        });
+    };
+
     const roles = [
         { value: 'admin', label: 'Administrador', color: 'bg-purple-100 text-purple-700' },
         { value: 'técnico', label: 'Técnico', color: 'bg-blue-100 text-blue-700' },
         { value: 'vendedor', label: 'Vendedor', color: 'bg-green-100 text-green-700' },
-        { value: 'gerente', label: 'Gerente', color: 'bg-orange-100 text-orange-700' }
+        { value: 'gerente', label: 'Gerente', color: 'bg-orange-100 text-orange-700' },
+        { value: 'client', label: 'Cliente', color: 'bg-cyan-100 text-cyan-700' }
     ];
 
     useEffect(() => {
@@ -31,14 +42,18 @@ const AdminUsers = () => {
 
     const fetchUsers = async () => {
         try {
-            const response = await fetch(`${API_CONFIG.API_URL}/users`, {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` }
+            setLoading(true);
+            const token = localStorage.getItem('adminToken');
+            const response = await fetch(buildApiUrl('/api/users'), {
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!response.ok) throw new Error('Failed to fetch');
             const data = await response.json();
-            setUsers(data);
+            const usersList = Array.isArray(data) ? data : (data.users || data.data || []);
+            setUsers(usersList);
         } catch (error) {
-            console.error(error);
+            console.error('Error fetching users:', error);
+            setUsers([]);
             showAlert({
                 title: 'Error',
                 message: 'Error al cargar usuarios',
@@ -55,8 +70,8 @@ const AdminUsers = () => {
 
         try {
             const url = editingUser
-                ? `${API_CONFIG.API_URL}/users/${editingUser.id}`
-                : `${API_CONFIG.API_URL}/users`;
+                ? buildApiUrl(`/api/users/${editingUser.id}`)
+                : buildApiUrl('/api/users');
 
             const method = editingUser ? 'PUT' : 'POST';
 
@@ -76,8 +91,8 @@ const AdminUsers = () => {
             });
 
             if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.error || 'Error al guardar');
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || 'Error al guardar');
             }
 
             await showAlert({
@@ -112,25 +127,33 @@ const AdminUsers = () => {
         setShowForm(true);
     };
 
-    const handleDelete = async (userId) => {
+    const handleDelete = async (userId, permanently = false) => {
         const confirmed = await showConfirm({
-            title: 'Confirmar desactivación',
-            message: '¿Desactivar este usuario?',
+            title: permanently ? 'Confirmar eliminación' : 'Confirmar desactivación',
+            message: permanently 
+                ? '¿Eliminar este usuario PERMANENTEMENTE? Esta acción no se puede deshacer.' 
+                : '¿Desactivar este usuario?',
             variant: 'danger'
         });
         if (!confirmed) return;
 
         try {
-            const response = await fetch(`${API_CONFIG.API_URL}/users/${userId}`, {
+            const endpoint = permanently 
+                ? `/api/users/${userId}/permanent` 
+                : `/api/users/${userId}`;
+            const response = await fetch(buildApiUrl(endpoint), {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` }
             });
 
-            if (!response.ok) throw new Error('Error al eliminar');
+            if (!response.ok) {
+                const errorBody = await response.json().catch(() => ({}));
+                throw new Error(errorBody.error || 'Error al eliminar');
+            }
 
             await showAlert({
-                title: 'Usuario desactivado',
-                message: 'Usuario desactivado',
+                title: permanently ? 'Usuario eliminado' : 'Usuario desactivado',
+                message: permanently ? 'Usuario eliminado permanentemente' : 'Usuario desactivado',
                 type: 'success'
             });
             fetchUsers();
@@ -143,17 +166,15 @@ const AdminUsers = () => {
         }
     };
 
-    const resetForm = () => {
-        setFormData({
-            name: '', email: '', password: '', role: 'admin', status: 'active'
-        });
-        setShowPassword(false);
-    };
+    const filteredUsers = users.filter(user => {
+        const matchesSearch = user.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                            user.email.toLowerCase().includes(searchTerm.toLowerCase());
+        if (showInactive) return matchesSearch;
+        return matchesSearch && user.status === 'active';
+    });
 
-    const filteredUsers = users.filter(u =>
-        u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        u.email?.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const totalPages = Math.ceil(filteredUsers.length / USERS_PER_PAGE);
+    const paginatedUsers = filteredUsers.slice((currentPage - 1) * USERS_PER_PAGE, currentPage * USERS_PER_PAGE);
 
     const getRoleBadge = (role) => {
         const roleObj = roles.find(r => r.value === role) || roles[0];
@@ -175,58 +196,71 @@ const AdminUsers = () => {
                     </Button>
                 </div>
 
-                {/* Search */}
-                <div className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm">
-                    <div className="relative">
-                        <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-                        <input
-                            type="text"
-                            placeholder="Buscar por nombre, email o usuario..."
-                            value={searchTerm}
-                            onChange={(e) => setSearchTerm(e.target.value)}
-                            className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:outline-none"
-                        />
+                {/* View Toggle & Search */}
+                <div className="bg-white p-3 rounded-xl border border-gray-100 shadow-sm">
+                    <div className="flex gap-4 items-center">
+                        <div className="relative flex-1">
+                            <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                            <input
+                                type="text"
+                                placeholder="Buscar..."
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-black focus:outline-none"
+                            />
+                        </div>
+                        <label className="flex items-center gap-2 cursor-pointer px-3 py-2 bg-gray-50 rounded-lg hover:bg-gray-100 text-sm">
+                            <input 
+                                type="checkbox" 
+                                checked={showInactive} 
+                                onChange={(e) => setShowInactive(e.target.checked)}
+                                className="w-4 h-4"
+                            />
+                            <span className="text-xs font-medium">Inactivos</span>
+                        </label>
                     </div>
                 </div>
 
-                {/* Users Table */}
-                <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+                {/* Compact Users Table */}
+                <div className="bg-white rounded-lg border border-gray-100 shadow-sm overflow-hidden">
                     <table className="w-full">
                         <thead className="bg-gray-50 border-b border-gray-200">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Usuario</th>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Email</th>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Rol</th>
-                                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Estado</th>
-                                <th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase">Acciones</th>
+                                <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">#</th>
+                                <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Nombre</th>
+                                <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Email</th>
+                                <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Rol</th>
+                                <th className="px-3 py-2 text-left text-[10px] font-bold text-gray-500 uppercase">Estado</th>
+                                <th className="px-3 py-2 text-right text-[10px] font-bold text-gray-500 uppercase">Acciones</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-50">
                             {loading ? (
-                                <tr><td colSpan="5" className="px-6 py-8 text-center text-gray-500">Cargando...</td></tr>
+                                <tr><td colSpan="6" className="px-3 py-4 text-center text-gray-500 text-sm">Cargando...</td></tr>
                             ) : filteredUsers.length === 0 ? (
-                                <tr><td colSpan="5" className="px-6 py-8 text-center text-gray-500">No hay usuarios</td></tr>
-                            ) : filteredUsers.map(user => (
-                                <tr key={user.id} className="hover:bg-gray-50 transition-colors">
-                                    <td className="px-6 py-4">
-                                        <div>
-                                            <p className="font-bold text-gray-900">{user.name}</p>
-                                            <p className="text-sm text-gray-500">{user.email}</p>
-                                        </div>
+                                <tr><td colSpan="6" className="px-3 py-4 text-center text-gray-500 text-sm">No hay usuarios</td></tr>
+                            ) : paginatedUsers.map((user, idx) => (
+                                <tr key={user.id} className="hover:bg-gray-50 transition-colors text-sm">
+                                    <td className="px-3 py-2 text-gray-400 text-xs">{idx + 1}</td>
+                                    <td className="px-3 py-2">
+                                        <span className="font-medium text-gray-900">{user.name}</span>
                                     </td>
-                                    <td className="px-6 py-4 text-sm text-gray-600">{user.email || '-'}</td>
-                                    <td className="px-6 py-4">{getRoleBadge(user.role)}</td>
-                                    <td className="px-6 py-4">
-                                        <span className={`px-2 py-1 rounded text-xs font-bold ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    <td className="px-3 py-2 text-gray-600 text-xs">{user.email}</td>
+                                    <td className="px-3 py-2">{getRoleBadge(user.role)}</td>
+                                    <td className="px-3 py-2">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${user.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                                             {user.status === 'active' ? 'Activo' : 'Inactivo'}
                                         </span>
                                     </td>
-                                    <td className="px-6 py-4 text-right space-x-2">
-                                        <button onClick={() => handleEdit(user)} className="text-blue-600 hover:text-blue-800">
-                                            <Edit2 className="w-4 h-4 inline" />
+                                    <td className="px-3 py-2 text-right space-x-1">
+                                        <button onClick={() => handleEdit(user)} className="text-blue-600 hover:text-blue-800 p-1">
+                                            <Edit2 className="w-3 h-3" />
                                         </button>
-                                        <button onClick={() => handleDelete(user.id)} className="text-red-600 hover:text-red-800">
-                                            <Trash2 className="w-4 h-4 inline" />
+                                        <button onClick={() => handleDelete(user.id, false)} className="text-orange-600 hover:text-orange-800 p-1" title="Desactivar">
+                                            <EyeOff className="w-3 h-3" />
+                                        </button>
+                                        <button onClick={() => handleDelete(user.id, true)} className="text-red-600 hover:text-red-800 p-1" title="Eliminar">
+                                            <Trash2 className="w-3 h-3" />
                                         </button>
                                     </td>
                                 </tr>
@@ -235,11 +269,40 @@ const AdminUsers = () => {
                     </table>
                 </div>
 
+                {/* Pagination */}
+                {totalPages > 1 && (
+                    <div className="flex justify-center gap-2 pt-2">
+                        <button 
+                            disabled={currentPage === 1}
+                            onClick={() => setCurrentPage(p => p - 1)}
+                            className="px-3 py-1 text-xs bg-gray-100 rounded disabled:opacity-50"
+                        >
+                            ←
+                        </button>
+                        <span className="px-3 py-1 text-xs text-gray-600">
+                            {currentPage} / {totalPages}
+                        </span>
+                        <button 
+                            disabled={currentPage === totalPages}
+                            onClick={() => setCurrentPage(p => p + 1)}
+                            className="px-3 py-1 text-xs bg-gray-100 rounded disabled:opacity-50"
+                        >
+                            →
+                        </button>
+                    </div>
+                )}
+
+                {/* Pagination Info */}
+                <div className="text-center text-xs text-gray-400">
+                    Mostrando {paginatedUsers.length} de {filteredUsers.length} usuario(s)
+                </div>
+
             </div>
 
             {/* Form Modal */}
-            {showForm && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+            <PortalWrapper isOpen={showForm}>
+                {showForm && (
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
                     <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden animate-scale-in max-h-[90vh] flex flex-col">
                         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50 flex-shrink-0">
                             <h3 className="font-bold text-xl flex items-center gap-2">
@@ -348,8 +411,9 @@ const AdminUsers = () => {
                             </form>
                         </div>
                     </div>
-                </div>
-            )}
+                    </div>
+                )}
+            </PortalWrapper>
 
 
         </AdminLayout>

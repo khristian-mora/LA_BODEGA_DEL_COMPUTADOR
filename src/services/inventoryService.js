@@ -1,16 +1,17 @@
-import { API_CONFIG } from '../config/config';
+import { buildApiUrl } from '../config/config';
 
-const API_URL = API_CONFIG.API_URL;
+const API_URL = buildApiUrl('/api/products');
 
 export const inventoryService = {
     getAllProducts: async () => {
         try {
-            const response = await fetch(`${API_URL}/products`);
+            const response = await fetch(API_URL);
             if (!response.ok) {
                 const text = await response.text();
                 throw new Error(`Failed to fetch products: ${response.status} ${text}`);
             }
-            return await response.json();
+            const data = await response.json();
+            return Array.isArray(data) ? data : (data.products || data.data || []);
         } catch (error) {
             console.error(error);
             return [];
@@ -19,7 +20,7 @@ export const inventoryService = {
 
     addProduct: async (productData) => {
         try {
-            const response = await fetch(`${API_URL}/products`, {
+            const response = await fetch(API_URL, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -38,7 +39,7 @@ export const inventoryService = {
 
     updateProduct: async (id, productData) => {
         try {
-            const response = await fetch(`${API_URL}/products/${id}`, {
+            const response = await fetch(`${API_URL}/${id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json',
@@ -105,5 +106,24 @@ export const inventoryService = {
             console.error(error);
             return { success: false };
         }
+    },
+
+    importProducts: async (file) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${buildApiUrl('/api/products/import')}`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+            },
+            body: formData
+        });
+        
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Error al importar productos');
+        }
+        return response.json();
     }
 };

@@ -62,7 +62,10 @@ const Navbar = () => {
                         <button className="p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block">
                             <Search className="w-5 h-5 text-gray-700" />
                         </button>
-                        <Link to="/login" className="p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block">
+                        <Link 
+                            to={localStorage.getItem('userToken') || localStorage.getItem('adminToken') ? "/profile" : "/login"} 
+                            className="p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block"
+                        >
                             <User className="w-5 h-5 text-gray-700" />
                         </Link>
 

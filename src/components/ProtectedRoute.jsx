@@ -8,11 +8,11 @@ import { Navigate, useLocation } from 'react-router-dom';
  */
 const ProtectedRoute = ({ children }) => {
     const location = useLocation();
-    const token = localStorage.getItem('adminToken');
+    const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
 
     if (!token) {
-        // Redirige a login guardando la ruta intentada
-        return <Navigate to="/admin/login" state={{ from: location }} replace />;
+        // Si no está logueado, redirige a login público
+        return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
     return children;
