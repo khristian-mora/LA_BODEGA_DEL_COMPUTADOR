@@ -47,7 +47,7 @@ const OrderStat = ({ label, value, icon: _Icon, trend, color }) => (
             </div>
         </div>
         <div className={`p-5 rounded-3xl ${color} bg-opacity-10 transition-transform group-hover:rotate-12 group-hover:scale-110 shadow-sm`}>
-            <Icon className={`w-6 h-6 ${color.replace('bg-', 'text-')}`} />
+            <_Icon className={`w-6 h-6 ${color.replace('bg-', 'text-')}`} />
         </div>
     </motion.div>
 );
