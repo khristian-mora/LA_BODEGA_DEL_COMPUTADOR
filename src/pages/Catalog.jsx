@@ -5,7 +5,7 @@ import ProductCard from '../components/ProductCard';
 import { useShop } from '../context/ShopContext';
 import { Filter, SlidersHorizontal, ChevronDown, Grid, List, ArrowUpDown, Plus } from 'lucide-react';
 import useSEO from '../hooks/useSEO';
-import { buildUploadUrl, PLACEHOLDER_IMAGE } from '../config/config';
+import { PLACEHOLDER_IMAGE } from '../config/config';
 import Button from '../components/Button';
 
 const BASE_URL = 'https://labodegadelcomputador.com';

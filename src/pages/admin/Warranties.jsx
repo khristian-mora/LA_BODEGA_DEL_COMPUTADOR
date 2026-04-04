@@ -43,7 +43,7 @@ const AdminWarranties = () => {
     // Filters
     const [filterStatus, setFilterStatus] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [filterExpiring, setFilterExpiring] = useState(false);
+    const [filterExpiring, _setFilterExpiring] = useState(false);
 
     const [formData, setFormData] = useState({
         ticketId: '', customerId: '', productId: '', startDate: '', endDate: '', terms: '', status: 'Active'

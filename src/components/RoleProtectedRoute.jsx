@@ -19,22 +19,21 @@ const RoleProtectedRoute = ({ children, allowedRoles }) => {
         return <Navigate to="/admin/login" state={{ from: location }} replace />;
     }
 
+    let user = null;
     try {
-        const user = JSON.parse(userStr);
-        
-        // Verificar si el rol del usuario está permitido en esta ruta
-        if (allowedRoles && !allowedRoles.includes(user.role)) {
-            // Si el rol no está permitido, lo devolvemos a la vista principal según su rol
-            if (user.role === 'técnico') {
-                return <Navigate to="/admin/tech-service" replace />;
-            }
-            return <Navigate to="/admin" replace />;
-        }
+        user = JSON.parse(userStr);
     } catch (e) {
-        // En caso de que el JSON del adminUser esté roto
         localStorage.removeItem('adminToken');
         localStorage.removeItem('adminUser');
         return <Navigate to="/admin/login" replace />;
+    }
+    
+    // Verificar si el rol del usuario está permitido en esta ruta
+    if (allowedRoles && !allowedRoles.includes(user.role)) {
+        if (user.role === 'técnico') {
+            return <Navigate to="/admin/tech-service" replace />;
+        }
+        return <Navigate to="/admin" replace />;
     }
 
     return children;

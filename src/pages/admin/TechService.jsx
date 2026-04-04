@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import Button from '../../components/Button';
 import { useShop } from '../../context/ShopContext';
-import { API_CONFIG, buildApiUrl, buildUploadUrl } from '../../config/config';
+import { API_CONFIG, buildApiUrl } from '../../config/config';
 import { useAudit } from '../../context/AuditContext';
 import { useModal } from '../../context/ModalContext';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -101,25 +101,25 @@ const DashboardMetrics = ({ tickets }) => {
 };
 
 const AdminTechService = () => {
-    const statusOrder = ['RECEIVED', 'DIAGNOSED', 'REPAIRING', 'READY', 'DELIVERED'];
+    const _statusOrder = ['RECEIVED', 'DIAGNOSED', 'REPAIRING', 'READY', 'DELIVERED'];
     const [searchParams] = useSearchParams();
     const { formatPrice: _formatPrice } = useShop();
     const { logAction } = useAudit();
-    const { showConfirm, showAlert, showPrompt } = useModal();
+    const { showConfirm, showAlert, showPrompt: _showPrompt } = useModal();
     const [tickets, setTickets] = useState([]);
-    const [loading, setLoading] = useState(true);
+    const [_loading, setLoading] = useState(true);
     const [showForm, setShowForm] = useState(false);
     const [viewMode, setViewMode] = useState('list');
     const [selectedTicket, setSelectedTicket] = useState(null);
-    const [isAdmin, setIsAdmin] = useState(false);
+    const [_isAdmin, setIsAdmin] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [technicians, setTechnicians] = useState([]);
-    const [customers, setCustomers] = useState([]);
+    const [_customers, _setCustomers] = useState([]);
     
     const [customerSearch, setCustomerSearch] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [showCustomerResults, setShowCustomerResults] = useState(false);
-    const [searching, setSearching] = useState(false);
+    const [_searching, _setSearching] = useState(false);
 
     // Wizard para crear ticket
     const [createStep, setCreateStep] = useState(1);
@@ -159,11 +159,11 @@ const AdminTechService = () => {
     });
 
     const [quoteItems, setQuoteItems] = useState([]);
-    const [availableProducts, setAvailableProducts] = useState([]);
-    const [prodSearch, setProdSearch] = useState('');
-    const [isSavingQuote, setIsSavingQuote] = useState(false);
+    const [_availableProducts, setAvailableProducts] = useState([]);
+    const [_prodSearch, _setProdSearch] = useState('');
+    const [_isSavingQuote, setIsSavingQuote] = useState(false);
     const [sendingEmail, setSendingEmail] = useState(false);
-    const [uploading, setUploading] = useState(false);
+    const [_uploading, _setUploading] = useState(false);
     const fileInputRef = useRef(null);
 
     const COMMON_FINDINGS = ["Pantalla Rota", "Teclado Dañado", "Bisagras Rotas", "Puertos USB", "Batería Inflada", "Suciedad", "Líquido"];
@@ -267,10 +267,10 @@ const AdminTechService = () => {
     useEffect(() => {
         const delayDebounceFn = setTimeout(async () => {
             if (customerSearch.length >= 2) {
-                setSearching(true);
+                _setSearching(true);
                 const results = await customerService.searchCustomers(customerSearch);
                 setSearchResults(results.customers || []);
-                setSearching(false);
+                _setSearching(false);
             } else {
                 setSearchResults([]);
             }
@@ -301,11 +301,11 @@ const AdminTechService = () => {
         setCustomerSearch('');
     };
 
-    const handleCreate = async (e) => {
+    const _handleCreate = async (e) => {
         e.preventDefault();
         setLoading(true);
         try {
-            const { photosIntake, pendingFiles, ...ticketData } = formData;
+            const { pendingFiles, ...ticketData } = formData;
             const newTicket = await ticketService.createTicket(ticketData);
             logAction('CREATE_TICKET', 'Taller', `Ticket #${newTicket.id} - ${formData.clientName}`);
 
@@ -349,7 +349,9 @@ const AdminTechService = () => {
         try {
             parsedFindings = typeof ticket.findings === 'string' ? JSON.parse(ticket.findings) : (ticket.findings || []);
             parsedRecommendations = typeof ticket.recommendations === 'string' ? JSON.parse(ticket.recommendations) : (ticket.recommendations || []);
-        } catch (e) {}
+        } catch (e) {
+            // Ignore parse errors
+        }
 
         setDiagnosisData({
             diagnosis: ticket.diagnosis || '',
@@ -364,7 +366,9 @@ const AdminTechService = () => {
         let parsedQuote = [];
         try {
             parsedQuote = typeof ticket.quoteItems === 'string' ? JSON.parse(ticket.quoteItems) : (ticket.quoteItems || []);
-        } catch (e) {}
+        } catch (e) {
+            // Ignore parse errors
+        }
         setQuoteItems(parsedQuote);
         fetchAllProducts();
     };
@@ -393,7 +397,7 @@ const AdminTechService = () => {
                 });
                 
                 if (uploadResponse.ok) {
-                    const uploadResult = await uploadResponse.json();
+                    const _uploadResult = await uploadResponse.json();
                     const evidenceResponse = await fetch(buildApiUrl(`/api/tickets/${selectedTicket.id}`), {
                         headers: { 'Authorization': `Bearer ${token}` }
                     });
@@ -447,7 +451,7 @@ const AdminTechService = () => {
         });
     };
 
-    const addProductToQuote = (prod) => {
+    const _addProductToQuote = (prod) => {
         setQuoteItems(prev => {
             const existing = prev.find(item => item.id === prod.id);
             const next = existing 
@@ -460,7 +464,7 @@ const AdminTechService = () => {
         });
     };
 
-    const removeProductFromQuote = (prodId) => {
+    const _removeProductFromQuote = (prodId) => {
         setQuoteItems(prev => {
             const next = prev.filter(item => item.id !== prodId);
             const total = next.reduce((sum, i) => sum + (i.price * i.quantity), 0);

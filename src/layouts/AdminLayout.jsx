@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { 
     LayoutDashboard, ShoppingCart, LogOut, Package, Users, Tag, 
     Wrench, DollarSign, RotateCcw, Menu, X, UserCircle, 
@@ -11,7 +11,6 @@ import { createPortal } from 'react-dom';
 
 const AdminLayout = ({ children, title, modal }) => {
     const location = useLocation();
-    const navigate = useNavigate();
     const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
 
     const user = JSON.parse(localStorage.getItem('adminUser') || '{}');

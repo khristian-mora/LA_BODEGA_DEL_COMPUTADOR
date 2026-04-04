@@ -51,11 +51,11 @@ const AdminAppointments = () => {
 
     // Filters
     const [filterStatus, setFilterStatus] = useState('');
-    const [filterServiceType, setFilterServiceType] = useState('');
-    const [filterTechnician, setFilterTechnician] = useState('');
+    const [_filterServiceType, _setFilterServiceType] = useState('');
+    const [_filterTechnician, _setFilterTechnician] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateRange, setDateRange] = useState({ start: '', end: '' });
-    const [statsPeriod, setStatsPeriod] = useState('month');
+    const [_dateRange, _setDateRange] = useState({ start: '', end: '' });
+    const [_statsPeriod, _setStatsPeriod] = useState('month');
 
     // Form State
     const [formData, setFormData] = useState({
@@ -74,11 +74,11 @@ const AdminAppointments = () => {
 
     useEffect(() => {
         fetchAppointments();
-    }, [currentPage, filterStatus, filterServiceType, filterTechnician, searchTerm, dateRange]);
+    }, [currentPage, filterStatus, _filterServiceType, _filterTechnician, searchTerm, _dateRange]);
 
     useEffect(() => {
         fetchStatistics();
-    }, [statsPeriod]);
+    }, [_statsPeriod]);
 
     const fetchCustomersAndTechnicians = async () => {
         try {
@@ -100,11 +100,11 @@ const AdminAppointments = () => {
                 page: currentPage,
                 limit: itemsPerPage,
                 status: filterStatus || undefined,
-                serviceType: filterServiceType || undefined,
-                technicianId: filterTechnician || undefined,
+                serviceType: _filterServiceType || undefined,
+                technicianId: _filterTechnician || undefined,
                 search: searchTerm || undefined,
-                startDate: dateRange.start || undefined,
-                endDate: dateRange.end || undefined
+                startDate: _dateRange.start || undefined,
+                endDate: _dateRange.end || undefined
             };
             const data = await appointmentService.getAppointments(params);
             setAppointments(data.appointments || []);
@@ -119,7 +119,7 @@ const AdminAppointments = () => {
 
     const fetchStatistics = async () => {
         try {
-            const data = await appointmentService.getAppointmentStats(statsPeriod);
+            const data = await appointmentService.getAppointmentStats(_statsPeriod);
             setStatistics(data || {});
         } catch (error) {
             console.error('Error fetching statistics:', error);
@@ -214,7 +214,7 @@ const AdminAppointments = () => {
         }
     };
 
-    const handleSendReminders = async () => {
+    const _handleSendReminders = async () => {
         try {
             setLoading(true);
             const token = localStorage.getItem('adminToken');

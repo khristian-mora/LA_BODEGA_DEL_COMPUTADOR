@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import Button from '../components/Button';
 import ProductCard from '../components/ProductCard';
 import { useShop } from '../context/ShopContext';
 import { ChevronRight, CheckCircle, Smartphone, Cpu, CircuitBoard, HardDrive, Box, Zap } from 'lucide-react';
-import { buildUploadUrl, PLACEHOLDER_IMAGE } from '../config/config';
+import { PLACEHOLDER_IMAGE, buildUploadUrl } from '../config/config';
 
 const Builder = () => {
     const { products, addToCart, formatPrice } = useShop();
@@ -194,7 +194,7 @@ const Builder = () => {
                                         </div>
                                     </div>
                                 ))}
-                                {getStepProducts().length === 0 && (
+                                {stepProducts.length === 0 && (
                                     <div className="col-span-full py-12 text-center bg-white rounded-2xl border border-dashed border-gray-300">
                                         <p className="text-gray-500">No encontramos componentes disponibles para esta categoría.</p>
                                         <Button variant="outline" className="mt-4" onClick={() => setCurrentStep(prev => prev + 1)}>

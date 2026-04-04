@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
+import { buildApiUrl } from '../../config/config';
 import AdminLayout from '../../layouts/AdminLayout';
 import { financeService } from '../../services/financeService';
 import { Plus, TrendingUp, TrendingDown, DollarSign, PieChart, Download, Filter, CheckCircle, XCircle, AlertTriangle, Clock, RefreshCw, Search, Activity, Calendar, ArrowUpRight, ArrowDownRight, Layers } from 'lucide-react';
@@ -463,7 +464,7 @@ const AdminFinance = () => {
                                             </td>
                                         </tr>
                                     ) : (
-                                        filteredExpenses.map((expense, idx) => (
+                                        filteredExpenses.map((expense, _idx) => (
                                             <motion.tr 
                                                 key={expense.id}
                                                 layout

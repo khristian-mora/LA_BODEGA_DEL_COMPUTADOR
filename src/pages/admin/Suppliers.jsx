@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState } from 'react';
 import AdminLayout from '../../layouts/AdminLayout';
 import { 
     supplierService, 
@@ -41,9 +41,9 @@ const AdminSuppliers = () => {
     const itemsPerPage = 12;
     
     // Filters
-    const [filterStatus, setFilterStatus] = useState('');
     const [filterCategory, setFilterCategory] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
+    const [filterStatus, _setFilterStatus] = useState('');
     
     // Form State
     const [formData, setFormData] = useState({

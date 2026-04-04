@@ -48,9 +48,9 @@ const AdminReturns = () => {
 
     // Filters
     const [filterStatus, setFilterStatus] = useState('');
-    const [filterReasonType, setFilterReasonType] = useState('');
+    const [filterReasonType, _setFilterReasonType] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
-    const [dateRange, setDateRange] = useState({ start: '', end: '' });
+    const [dateRange, _setDateRange] = useState({ start: '', end: '' });
 
     // Form states
     const [formData, setFormData] = useState({

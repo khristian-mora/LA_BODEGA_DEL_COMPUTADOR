@@ -20,9 +20,9 @@ const AdminInventory = () => {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [currentProduct, setCurrentProduct] = useState(null);
     const [uploading, setUploading] = useState(false);
-    const [currentPage, setCurrentPage] = useState(1);
-    const [totalPages, setTotalPages] = useState(1);
-    const itemsPerPage = 10;
+    const [_currentPage, _setCurrentPage] = useState(1);
+    const [_totalPages, _setTotalPages] = useState(1);
+    const _itemsPerPage = 10;
     const fileInputRef = React.useRef(null);
     const [searchTerm, setSearchTerm] = useState('');
     const [categoryFilter, setCategoryFilter] = useState('all');
@@ -75,7 +75,7 @@ const AdminInventory = () => {
             // Handle both legacy array and new paginated object
             const productsList = Array.isArray(data) ? data : (data.products || data.data || []);
             setProducts(productsList);
-            setTotalPages(data.totalPages || 1);
+            _setTotalPages(data.totalPages || 1);
         } catch (error) {
             console.error('Error fetching products:', error);
             setProducts([]);

@@ -29,7 +29,7 @@ const StatusBadge = ({ status }) => {
     );
 };
 
-const OrderStat = ({ label, value, icon: Icon, trend, color }) => (
+const OrderStat = ({ label, value, icon: _Icon, trend, color }) => (
     <motion.div 
         whileHover={{ y: -5 }}
         className="bg-white/70 backdrop-blur-xl p-8 rounded-[2.5rem] border border-white/40 shadow-sm flex items-center justify-between group"

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { buildApiUrl } from '../../config/config';
+import { useModal } from '../../context/ModalContext';
 import AdminLayout from '../../layouts/AdminLayout';
 import { 
     History, Search, Download, RefreshCw, User, Shield, 
@@ -36,7 +37,7 @@ const GlassCard = ({ children, className = "", delay = 0 }) => (
     </motion.div>
 );
 
-const PremiumStatCard = ({ title, value, subtext, icon: Icon, color, delay = 0 }) => {
+const PremiumStatCard = ({ title, value, subtext, icon: _Icon, color, delay = 0 }) => {
     const colorMap = {
         purple: "from-purple-500/20 to-purple-500/5 text-purple-600 border-purple-100",
         blue: "from-blue-500/20 to-blue-500/5 text-blue-600 border-blue-100",
@@ -71,6 +72,7 @@ const PremiumStatCard = ({ title, value, subtext, icon: Icon, color, delay = 0 }
 };
 
 const Audit = () => {
+    const { showAlert } = useModal();
     const [logs, setLogs] = useState([]);
     const [stats, setStats] = useState(null);
     const [recentActivity, setRecentActivity] = useState([]);
@@ -200,7 +202,7 @@ const Audit = () => {
         );
     }, [logs, searchTerm]);
 
-    const handleExport = async (format) => {
+    const handleExport = async (_format) => {
         try {
             setLoading(true);
             const token = localStorage.getItem('adminToken');

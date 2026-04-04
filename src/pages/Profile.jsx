@@ -26,7 +26,6 @@ const Profile = () => {
     const [tickets, setTickets] = useState([]);
     const [orders, setOrders] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
     const [selectedOrder, setSelectedOrder] = useState(null);
     const [orderItems, setOrderItems] = useState([]);
     const [loadingItems, setLoadingItems] = useState(false);
@@ -34,7 +33,7 @@ const Profile = () => {
     const [editData, setEditData] = useState({
         name: '', phone: '', address: '', city: '', department: '', idNumber: ''
     });
-    const { cart, formatPrice, addToCart } = useShop();
+    const { cart, formatPrice } = useShop();
 
     useEffect(() => {
         const fetchProfileData = async () => {
@@ -85,7 +84,6 @@ const Profile = () => {
                 }
             } catch (err) {
                 console.error('Error fetching profile data:', err);
-                setError('No se pudo cargar toda la información.');
             } finally {
                 setLoading(false);
             }
@@ -126,7 +124,6 @@ const Profile = () => {
                 body: JSON.stringify(editData)
             });
             if (res.ok) {
-                const data = await res.json();
                 // Update local states
                 setUser(prev => ({ ...prev, ...editData }));
                 

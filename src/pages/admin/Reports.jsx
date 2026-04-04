@@ -24,7 +24,7 @@ const GlassCard = ({ children, className = "" }) => (
     </motion.div>
 );
 
-const PremiumStatCard = ({ title, value, subtext, icon: Icon, color, trend, delay = 0 }) => {
+const PremiumStatCard = ({ title, value, subtext, icon: _Icon, color, trend, delay = 0 }) => {
     const colorMap = {
         green: "from-emerald-500/20 to-emerald-500/5 text-emerald-600 border-emerald-100",
         blue: "from-blue-500/20 to-blue-500/5 text-blue-600 border-blue-100",
