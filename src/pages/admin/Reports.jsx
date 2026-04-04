@@ -57,7 +57,7 @@ const PremiumStatCard = ({ title, value, subtext, icon: _Icon, color, trend, del
                     </div>
                 </div>
                 <div className={`p-4 rounded-2xl bg-gradient-to-br ${colorMap[color]} shadow-inner group-hover:scale-110 transition-transform duration-500`}>
-                    <Icon className="w-6 h-6 stroke-[2.5px]" />
+                    <_Icon className="w-6 h-6 stroke-[2.5px]" />
                 </div>
             </div>
         </motion.div>
