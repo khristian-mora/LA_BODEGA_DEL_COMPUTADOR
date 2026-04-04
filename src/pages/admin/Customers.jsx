@@ -34,14 +34,19 @@ const AdminCustomers = () => {
     const canModify = isAdmin || userRole === 'vendedor';
 
     const [formData, setFormData] = useState({
-        name: '', email: '', phone: '', address: '', idNumber: '', customerType: 'Regular', notes: '', birthday: ''
+        name: '', email: '', phone: '', address: '', idNumber: '', clientType: 'Persona', customerType: 'Regular', notes: '', birthday: ''
     });
+
+    const clientTypes = [
+        { value: 'Persona', label: 'Persona' },
+        { value: 'Empresa', label: 'Empresa' }
+    ];
 
     const customerTypes = [
         { value: 'VIP', label: 'VIP', color: 'text-purple-500 bg-purple-500/10 border-purple-500/20', icon: Star },
         { value: 'Regular', label: 'Regular', color: 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20', icon: Users },
         { value: 'Nuevo', label: 'Nuevo', color: 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20', icon: UserPlus },
-        { value: 'Corporativo', label: 'Corporativo', color: 'text-amber-500 bg-amber-500/10 border-amber-500/20', icon: Briefcase }
+        { value: 'Mayorista', label: 'Mayorista', color: 'text-amber-500 bg-amber-500/10 border-amber-500/20', icon: Briefcase }
     ];
 
     const [currentPage, setCurrentPage] = useState(1);
@@ -149,6 +154,7 @@ const AdminCustomers = () => {
             phone: customer.phone || '',
             address: customer.address || '',
             idNumber: customer.idNumber || '',
+            clientType: customer.clientType || 'Persona',
             customerType: customer.customerType || 'Regular',
             notes: customer.notes || '',
             birthday: customer.birthday || ''
@@ -270,7 +276,7 @@ const AdminCustomers = () => {
     };
 
     const resetForm = () => {
-        setFormData({ name: '', email: '', phone: '', address: '', idNumber: '', customerType: 'Regular', notes: '', birthday: '' });
+        setFormData({ name: '', email: '', phone: '', address: '', idNumber: '', clientType: 'Persona', customerType: 'Regular', notes: '', birthday: '' });
     };
 
     const filteredCustomers = customers.filter(c =>
@@ -615,14 +621,22 @@ const AdminCustomers = () => {
                                         </div>
                                         <div>
                                             <label className="text-xs font-medium text-slate-500 mb-1 block">Tipo de Cliente</label>
+                                            <select value={formData.clientType} onChange={e => setFormData({ ...formData, clientType: e.target.value })} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:border-slate-900 transition-all outline-none">
+                                                {clientTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="text-xs font-medium text-slate-500 mb-1 block">Categoría</label>
                                             <select value={formData.customerType} onChange={e => setFormData({ ...formData, customerType: e.target.value })} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:border-slate-900 transition-all outline-none">
                                                 {customerTypes.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
                                             </select>
                                         </div>
-                                        <div>
-                                            <label className="text-xs font-medium text-slate-500 mb-1 block">Fecha de Nacimiento</label>
-                                            <input type="date" value={formData.birthday} onChange={e => setFormData({ ...formData, birthday: e.target.value })} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:border-slate-900 transition-all outline-none" />
-                                        </div>
+                                        {formData.clientType === 'Persona' && (
+                                            <div>
+                                                <label className="text-xs font-medium text-slate-500 mb-1 block">Fecha de Nacimiento</label>
+                                                <input type="date" value={formData.birthday} onChange={e => setFormData({ ...formData, birthday: e.target.value })} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:border-slate-900 transition-all outline-none" />
+                                            </div>
+                                        )}
                                         <div className="md:col-span-2">
                                             <label className="text-xs font-medium text-slate-500 mb-1 block">Dirección</label>
                                             <input value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="w-full h-10 bg-white border border-slate-200 rounded-lg px-3 text-sm focus:border-slate-900 transition-all outline-none" />

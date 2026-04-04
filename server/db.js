@@ -251,6 +251,7 @@ function initDb() {
         city TEXT,
         department TEXT,
         idNumber TEXT,
+        clientType TEXT DEFAULT 'Persona',
         customerType TEXT DEFAULT 'Regular',
         notes TEXT,
         status TEXT DEFAULT 'active',
@@ -267,6 +268,7 @@ function initDb() {
                 db.run('ALTER TABLE customers ADD COLUMN lastPurchaseDate TEXT', () => {});
                 db.run('ALTER TABLE customers ADD COLUMN city TEXT', () => {});
                 db.run('ALTER TABLE customers ADD COLUMN department TEXT', () => {});
+                db.run('ALTER TABLE customers ADD COLUMN clientType TEXT DEFAULT "Persona"', () => {});
             }
         });
 

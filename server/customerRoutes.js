@@ -182,7 +182,7 @@ export const getCustomer = (req, res) => {
 
 // Create customer with validation and audit
 export const createCustomer = async (req, res) => {
-    const { name, email, phone, address, idNumber, customerType, notes, birthday } = req.body;
+    const { name, email, phone, address, idNumber, clientType, customerType, notes, birthday } = req.body;
 
     // Validación básica manual
     if (!name || name.trim() === '') {
@@ -217,13 +217,19 @@ export const createCustomer = async (req, res) => {
         }
     }
 
-    // Validar tipo de cliente
-    const validTypes = ['Regular', 'VIP', 'Mayorista', 'Nuevo'];
-    if (customerType && !validTypes.includes(customerType)) {
-        return res.status(400).json({ error: `Tipo debe ser: ${validTypes.join(', ')}` });
+    // Validar tipo de cliente (persona o empresa)
+    const validClientTypes = ['Persona', 'Empresa'];
+    if (clientType && !validClientTypes.includes(clientType)) {
+        return res.status(400).json({ error: `Tipo de cliente debe ser: ${validClientTypes.join(', ')}` });
     }
 
-    const sql = 'INSERT INTO customers (name, email, phone, address, idNumber, customerType, notes, status, birthday, totalSpent, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    // Validar tipo de categoría
+    const validTypes = ['Regular', 'VIP', 'Mayorista', 'Nuevo'];
+    if (customerType && !validTypes.includes(customerType)) {
+        return res.status(400).json({ error: `Categoría debe ser: ${validTypes.join(', ')}` });
+    }
+
+    const sql = 'INSERT INTO customers (name, email, phone, address, idNumber, clientType, customerType, notes, status, birthday, totalSpent, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
     const now = new Date().toISOString();
 
     db.run(sql, [
@@ -232,6 +238,7 @@ export const createCustomer = async (req, res) => {
         phone ? phone.trim() : null, 
         address ? address.trim() : null, 
         idNumber ? idNumber.trim() : null, 
+        clientType || 'Persona',
         customerType || 'Regular', 
         notes ? notes.trim() : null,
         'active',
@@ -258,6 +265,7 @@ export const createCustomer = async (req, res) => {
             name: name.trim(), 
             email: email ? email.trim().toLowerCase() : null, 
             phone: phone ? phone.trim() : null,
+            clientType: clientType || 'Persona',
             customerType: customerType || 'Regular',
             status: 'active',
             birthday: birthday || null,
@@ -269,7 +277,7 @@ export const createCustomer = async (req, res) => {
 // Update customer with validation and audit
 export const updateCustomer = async (req, res) => {
     const customerId = req.params.id;
-    const { name, email, phone, address, idNumber, customerType, notes, status, birthday, totalSpent, lastPurchaseDate } = req.body;
+    const { name, email, phone, address, idNumber, clientType, customerType, notes, status, birthday, totalSpent, lastPurchaseDate } = req.body;
 
     // Validar ID
     if (!customerId || isNaN(customerId)) {
@@ -314,10 +322,17 @@ export const updateCustomer = async (req, res) => {
         }
     }
 
+    if (clientType !== undefined) {
+        const validClientTypes = ['Persona', 'Empresa'];
+        if (!validClientTypes.includes(clientType)) {
+            return res.status(400).json({ error: `Tipo de cliente debe ser: ${validClientTypes.join(', ')}` });
+        }
+    }
+
     if (customerType !== undefined) {
         const validTypes = ['Regular', 'VIP', 'Mayorista', 'Nuevo'];
         if (!validTypes.includes(customerType)) {
-            return res.status(400).json({ error: `Tipo debe ser: ${validTypes.join(', ')}` });
+            return res.status(400).json({ error: `Categoría debe ser: ${validTypes.join(', ')}` });
         }
     }
 
@@ -337,6 +352,7 @@ export const updateCustomer = async (req, res) => {
     if (phone !== undefined) { updates.push('phone = ?'); params.push(phone ? phone.trim() : null); }
     if (address !== undefined) { updates.push('address = ?'); params.push(address ? address.trim() : null); }
     if (idNumber !== undefined) { updates.push('idNumber = ?'); params.push(idNumber ? idNumber.trim() : null); }
+    if (clientType !== undefined) { updates.push('clientType = ?'); params.push(clientType); }
     if (customerType !== undefined) { updates.push('customerType = ?'); params.push(customerType); }
     if (notes !== undefined) { updates.push('notes = ?'); params.push(notes ? notes.trim() : null); }
     if (status !== undefined) { updates.push('status = ?'); params.push(status); }
