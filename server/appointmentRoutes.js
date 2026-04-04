@@ -627,7 +627,7 @@ export const deleteAppointment = (req, res) => {
 };
 
 // Get appointments by date range (legacy support)
-export const getAppointmentsByDateRange = (req, res) => {
+export const getAppointmentsByDateRange = (_req, _res) => {
     // ... code ...
 };
 

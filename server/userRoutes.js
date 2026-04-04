@@ -177,7 +177,7 @@ export const googleLogin = async (req, res) => {
         });
 
         const payload = ticket.getPayload();
-        const { sub: googleId, email, name, picture } = payload;
+        const { sub: _googleId, email, name, picture } = payload;
 
         // Check if user exists
         db.get('SELECT * FROM users WHERE email = ?', [email], async (err, user) => {
@@ -558,7 +558,6 @@ export const syncCart = (req, res) => {
 
 export const getMyProfile = (req, res) => {
     const userId = req.user.id;
-    const email = req.user.email;
 
     // Fetch user basic info and customer CRM data
     const query = `

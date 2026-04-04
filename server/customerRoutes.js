@@ -182,7 +182,7 @@ export const getCustomer = (req, res) => {
 
 // Create customer with validation and audit
 export const createCustomer = async (req, res) => {
-    const { name, email, phone, address, idNumber, customerType, notes } = req.body;
+    const { name, email, phone, address, idNumber, customerType, notes, birthday } = req.body;
 
     // Validación básica manual
     if (!name || name.trim() === '') {

@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
-import { db, dbPath, logActivity } from './db.js';
+import { db } from './db.js';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
@@ -11,10 +11,7 @@ import nodemailer from 'nodemailer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import * as otplib from 'otplib';
-const { authenticator } = otplib;
 import QRCode from 'qrcode';
-import crypto from 'crypto';
 
 // Modular Route Imports
 import * as userRoutes from './userRoutes.js';
@@ -26,7 +23,6 @@ import * as warrantyRoutes from './warrantyRoutes.js';
 import * as customerReportRoutes from './customerReportRoutes.js';
 import * as orderRoutes from './orderRoutes.js';
 import * as intakeReceiptRoutes from './intakeReceiptRoutes.js';
-import * as catalogRoutes from './catalogRoutes.js';
 import * as automationRoutes from './automationRoutes.js';
 import * as settingsRoutes from './settingsRoutes.js';
 import * as supplierRoutes from './supplierRoutes.js';
@@ -140,9 +136,9 @@ if (process.env.SMTP_HOST && process.env.SMTP_USER) {
         auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
     });
 }
-const sendTicketNotification = async (ticket, status) => {
+// Legacy unused function - keeping for potential future use
+const _sendTicketNotification = async (_ticket, _status) => {
     if (!emailTransporter) return;
-    // ... logic for sending mail ...
 };
 
 // --- AUTH ROUTES ---
@@ -196,6 +192,7 @@ app.get('/api/tickets/:id', authenticateToken, (req, res) => {
 app.post('/api/tickets', authenticateToken, (req, res) => {
     const { clientName, clientPhone, clientEmail, deviceType, brand, model, issueDescription } = req.body;
     const now = new Date().toISOString();
+    const sql = `INSERT INTO tickets (clientName, clientPhone, clientEmail, deviceType, brand, model, issueDescription, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
     db.run(sql, [clientName, clientPhone, clientEmail, deviceType, brand, model, issueDescription, now], function(err) {
         if (err) return res.status(500).json({ error: err.message });
         
@@ -215,7 +212,7 @@ app.post('/api/tickets', authenticateToken, (req, res) => {
     });
 });
 app.put('/api/tickets/:id', authenticateToken, (req, res) => {
-    const { status, diagnosis, estimatedCost, deviceType, brand, model, serial } = req.body;
+    const { status, diagnosis, estimatedCost, deviceType, brand, model } = req.body;
     const ticketId = req.params.id;
     const now = new Date().toISOString();
     
@@ -325,7 +322,7 @@ app.post('/api/upload-damage-photos/:ticketId', authenticateToken, uploadBuffer.
             if (row && row.damagePhotos) {
                 try {
                     existingPhotos = JSON.parse(row.damagePhotos);
-                } catch {}
+                } catch (_) { /* ignore parse errors */ }
             }
             
             const allPhotos = [...existingPhotos, ...uploadedPhotos];

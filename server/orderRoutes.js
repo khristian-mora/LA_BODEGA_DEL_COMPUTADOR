@@ -1,4 +1,4 @@
-import { db, logActivity } from './db.js';
+import { db } from './db.js';
 import { triggerN8nWebhook } from './webhooks.js';
 import { broadcastNotification } from './notificationRoutes.js';
 
@@ -250,7 +250,7 @@ export const createOrder = async (req, res) => {
                                 const endDate = new Date();
                                 endDate.setMonth(endDate.getMonth() + warrantyMonths);
                                 
-                                return new Promise((resolve, reject) => {
+                                return new Promise((resolve, _reject) => {
                                     db.run(
                                         `INSERT INTO warranties (orderId, productId, startDate, endDate, terms, status, createdAt) 
                                          VALUES (?, ?, ?, ?, ?, ?, ?)`,

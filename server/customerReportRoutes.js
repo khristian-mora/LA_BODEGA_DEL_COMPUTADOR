@@ -2,22 +2,6 @@
 import { db } from './db.js';
 import nodemailer from 'nodemailer';
 
-
-// Helper to get full URL for images if stored relatively
-const getFullImageUrl = (path) => {
-    if (!path) return '';
-    if (path.startsWith('http')) return path;
-    
-    // Ensure the path starts with /uploads/
-    let fullPath = path;
-    if (!path.startsWith('/uploads/')) {
-        fullPath = `/uploads/${path.startsWith('/') ? path.slice(1) : path}`;
-    }
-
-    const baseUrl = process.env.PUBLIC_URL || 'http://localhost:3000';
-    return `${baseUrl}${fullPath}`;
-};
-
 // Helper to fetch settings from DB
 const getSetting = (key, defaultValue = '') => {
     return new Promise((resolve) => {

@@ -39,12 +39,6 @@ const getAbsoluteUrl = (path, baseUrl) => {
 };
 
 const generateIntakeHtml = (ticket, evidenceList = [], baseUrl = '', settings = {}) => {
-    const businessName = settings.businessName || 'LA BODEGA DEL COMPUTADOR';
-    const businessAddress = settings.businessAddress || 'Cl. 49 #13-13, Barrancabermeja';
-    const businessPhone = settings.whatsappNumber || '+57 317 653 2488';
-    const businessEmail = settings.businessEmail || 'ventas@labodegadelcomputador.com';
-    const businessDomain = settings.businessDomain || 'www.labodegadelcomputador.com';
-
     const date = new Date(ticket.createdAt).toLocaleDateString('es-CO', {
         year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
     });
@@ -279,10 +273,6 @@ export const sendIntakeReceipt = async (req, res) => {
             return res.json({ success: false, message: 'No hay un email válido para enviar el comprobante.' });
         }
 
-        const host = req.get('host');
-        const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
-        const baseUrl = `${protocol}://${host}`;
-        
         // Generate PDF buffer
         const doc = new PDFDocument({ size: 'A4', margin: 50 });
         let pdfBuffer = [];

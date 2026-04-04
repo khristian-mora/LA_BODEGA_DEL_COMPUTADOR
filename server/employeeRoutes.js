@@ -113,7 +113,7 @@ export const deleteEmployee = (req, res) => {
 // Calculate comprehensive payroll
 // Calculate comprehensive payroll (Colombian Law)
 export const calculatePayroll = (req, res) => {
-    const { month, year, department, role } = req.query;
+    const { month, year, department } = req.query;
     
     // Default to current month if not specified
     const targetMonth = month || new Date().getMonth() + 1;
@@ -162,7 +162,7 @@ export const calculatePayroll = (req, res) => {
             const auxTransporte = 162000;
 
             const payroll = employees.map(e => {
-                const attendance = attendanceMap[e.id] || { presentDays: 0, extraDiurna: 0, extraNocturna: 0, extraDominicalDiurna: 0, extraNocturna: 0 };
+                const attendance = attendanceMap[e.id] || { presentDays: 0, extraDiurna: 0, extraNocturna: 0, extraDominicalDiurna: 0, extraDominicalNocturna: 0 };
                 const baseSalary = e.salary || 0;
                 
                 // Hourly rate (Salary / 235 standard hours)
