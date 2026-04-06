@@ -38,7 +38,7 @@
     "react-dom": "^19.2.0",
     "react-router-dom": "^7.13.0",
     "react-signature-canvas": "^1.1.0-alpha.2",
-    "sqlite3": "^5.1.7",
+    "sqlite3": "^6.0.1",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
