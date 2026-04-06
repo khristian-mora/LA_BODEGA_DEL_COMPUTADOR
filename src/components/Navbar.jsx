@@ -13,6 +13,8 @@ const Navbar = () => {
     const [isScrolled, setIsScrolled] = useState(false);
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [isCartOpen, setIsCartOpen] = useState(false);
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
 
     useEffect(() => {
         const handleScroll = () => {
@@ -30,13 +32,14 @@ const Navbar = () => {
                 animate={{ y: 0 }}
                 transition={{ type: "spring", stiffness: 200, damping: 25 }}
             >
-                <div className={`w-full px-6 md:px-12 h-20 flex items-center justify-between transition-all duration-300 ${isScrolled ? 'bg-white/80 backdrop-blur-md shadow-sm py-4' : 'bg-transparent py-6'}`}>
+                <div className={`w-full px-6 md:px-12 h-20 flex items-center transition-all duration-300 ${isScrolled ? 'bg-white/80 backdrop-blur-md shadow-sm py-4' : 'bg-transparent py-6'} lg:grid lg:grid-cols-[1fr_auto_1fr] flex justify-between`}>
 
                     {/* Left: Logo */}
-                    <div className="flex-1 flex justify-start z-20">
+                    <div className="flex justify-start z-20">
                         <Link to="/" className="text-xl font-bold tracking-tighter flex items-center gap-3">
                             <Monitor className="w-8 h-8" />
-                            <span className="uppercase whitespace-nowrap">LA BODEGA DEL COMPUTADOR</span>
+                            <span className="uppercase whitespace-nowrap hidden lg:inline">LA BODEGA DEL COMPUTADOR</span>
+                            <span className="uppercase whitespace-nowrap lg:hidden">LBDC</span>
                         </Link>
                     </div>
 
@@ -51,16 +54,30 @@ const Navbar = () => {
                         <Link to="/gaming" className={`text-sm font-medium transition-colors whitespace-nowrap ${location.pathname === '/gaming' ? 'font-bold border-b-2 border-black' : 'hover:text-gray-600'}`}>
                             Zona Gaming
                         </Link>
-                        <Link to="/builder" className="text-sm font-bold bg-gradient-to-r from-slate-800 to-black text-white px-4 py-2 rounded-full hover:from-black hover:to-slate-800 transition-all shadow-lg">
+                        <Link to="/builder" className="text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-2 rounded-full hover:from-blue-700 hover:to-indigo-700 transition-all shadow-md">
                             Arma tu PC
                         </Link>
-                        <Link to="/enterprise" className="text-sm font-medium hover:text-gray-600 transition-colors whitespace-nowrap">Empresas</Link>
                     </div>
 
                     {/* Right: Icons */}
-                    <div className="flex-1 flex justify-end items-center gap-4 z-20">
-                        <button className="p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block">
-                            <Search className="w-5 h-5 text-gray-700" />
+                    <div className="flex justify-end items-center gap-4 z-20">
+                        {/* Desktop Search Bar (Expandable) */}
+                        <div className={`hidden md:flex items-center bg-gray-100 rounded-full px-4 py-1.5 transition-all duration-300 ${isSearchOpen ? 'w-64 opacity-100' : 'w-10 opacity-0 pointer-events-none'}`}>
+                            <Search className="w-4 h-4 text-gray-500 mr-2" />
+                            <input 
+                                type="text"
+                                placeholder="Buscar productos..."
+                                className="bg-transparent border-none focus:ring-0 text-sm w-full"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                            />
+                        </div>
+
+                        <button 
+                            className={`p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block ${isSearchOpen ? 'bg-gray-200' : ''}`}
+                            onClick={() => setIsSearchOpen(!isSearchOpen)}
+                        >
+                            {isSearchOpen ? <X className="w-5 h-5 text-gray-700" /> : <Search className="w-5 h-5 text-gray-700" />}
                         </button>
                         <Link 
                             to={localStorage.getItem('userToken') || localStorage.getItem('adminToken') ? "/profile" : "/login"} 
