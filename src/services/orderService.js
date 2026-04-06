@@ -68,6 +68,17 @@ export const orderService = {
         return await response.json();
     },
 
+    deleteOrder: async (id) => {
+        const token = localStorage.getItem('adminToken') || localStorage.getItem('token');
+        const response = await fetch(`${API_URL}/${id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (!response.ok) throw new Error('Failed to delete order');
+        return await response.json();
+    },
+
     getDashboardStats: async () => {
         try {
             const data = await orderService.getOrders();

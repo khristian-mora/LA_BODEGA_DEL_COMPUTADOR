@@ -139,7 +139,11 @@ const logActivity = (data) => {
         userAgent, 
         timestamp
     ], (err) => {
-        if (err) console.error('[AUDIT] Failed to log activity:', err.message);
+        if (err) {
+            console.error('[AUDIT] Failed to log activity:', err.message);
+            console.error('[AUDIT] SQL:', sql);
+            console.error('[AUDIT] Params:', [userId || 0, action, module || null, entityType || null, entityId || null, '...', timestamp]);
+        }
     });
 };
 
@@ -204,9 +208,25 @@ function initDb() {
                 db.run('ALTER TABLE tickets ADD COLUMN timeline TEXT', () => {});
                 db.run('ALTER TABLE tickets ADD COLUMN damagePhotos TEXT', () => {});
                 db.run('ALTER TABLE tickets ADD COLUMN laborCost INTEGER DEFAULT 0', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN laborDescription TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN laborItems TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN repairNotes TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN estimatedDeliveryDate TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN deliveredDate TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN signatureIntakeTech TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN signatureIntakeClient TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN signatureDeliveryTech TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN signatureDeliveryClient TEXT', () => {});
             }
         });
 
+        db.run(`CREATE TABLE IF NOT EXISTS custom_findings(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            type TEXT NOT NULL,
+            value TEXT NOT NULL,
+            createdAt TEXT DEFAULT CURRENT_TIMESTAMP
+        )`);
+        
         db.run(`CREATE TABLE IF NOT EXISTS users(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
@@ -279,12 +299,19 @@ function initDb() {
         technicianId INTEGER,
         serviceType TEXT,
         scheduledDate TEXT,
+        duration INTEGER DEFAULT 60,
         status TEXT DEFAULT 'Pending',
         notes TEXT,
+        reminder TEXT,
         createdAt TEXT,
         FOREIGN KEY (customerId) REFERENCES customers(id),
         FOREIGN KEY (technicianId) REFERENCES users(id)
-    )`);
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE appointments ADD COLUMN duration INTEGER DEFAULT 60', () => {});
+                db.run('ALTER TABLE appointments ADD COLUMN reminder TEXT', () => {});
+            }
+        });
 
         // Warranties
         db.run(`CREATE TABLE IF NOT EXISTS warranties(
@@ -297,21 +324,44 @@ function initDb() {
         endDate TEXT,
         terms TEXT,
         status TEXT DEFAULT 'Active',
+        warrantyType TEXT DEFAULT 'standard',
+        supplierId INTEGER,
+        notes TEXT,
         createdAt TEXT,
+        updatedAt TEXT,
         FOREIGN KEY (ticketId) REFERENCES tickets(id),
-        FOREIGN KEY (customerId) REFERENCES customers(id)
-    )`);
+        FOREIGN KEY (customerId) REFERENCES customers(id),
+        FOREIGN KEY (supplierId) REFERENCES suppliers(id)
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE warranties ADD COLUMN warrantyType TEXT DEFAULT "standard"', () => {});
+                db.run('ALTER TABLE warranties ADD COLUMN supplierId INTEGER', () => {});
+                db.run('ALTER TABLE warranties ADD COLUMN notes TEXT', () => {});
+                db.run('ALTER TABLE warranties ADD COLUMN updatedAt TEXT', () => {});
+                db.run('ALTER TABLE warranties ADD COLUMN warrantyCategory TEXT DEFAULT "standard"', () => {});
+            }
+        });
 
         // Warranty Claims
         db.run(`CREATE TABLE IF NOT EXISTS warranty_claims(
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         warrantyId INTEGER,
+        ticketId INTEGER,
         claimDate TEXT,
         description TEXT,
+        priority TEXT DEFAULT 'medium',
+        status TEXT DEFAULT 'pending',
         resolution TEXT,
         resolvedDate TEXT,
-        FOREIGN KEY (warrantyId) REFERENCES warranties(id)
-    )`);
+        FOREIGN KEY (warrantyId) REFERENCES warranties(id),
+        FOREIGN KEY (ticketId) REFERENCES tickets(id)
+    )`, (err) => {
+            if (!err) {
+                db.run('ALTER TABLE warranty_claims ADD COLUMN ticketId INTEGER', () => {});
+                db.run('ALTER TABLE warranty_claims ADD COLUMN priority TEXT DEFAULT "medium"', () => {});
+                db.run('ALTER TABLE warranty_claims ADD COLUMN status TEXT DEFAULT "pending"', () => {});
+            }
+        });
 
         // Notifications
         db.run(`CREATE TABLE IF NOT EXISTS notifications(
@@ -324,7 +374,9 @@ function initDb() {
         isRead INTEGER DEFAULT 0,
         createdAt TEXT,
         FOREIGN KEY (userId) REFERENCES users(id)
-    )`);
+    )`, () => {
+            db.run('ALTER TABLE notifications ADD COLUMN isRead INTEGER DEFAULT 0', () => {});
+        });
 
         // Orders (Product Sales)
         db.run(`CREATE TABLE IF NOT EXISTS orders(

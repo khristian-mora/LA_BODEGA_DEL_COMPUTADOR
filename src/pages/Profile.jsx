@@ -5,11 +5,12 @@ import Button from '../components/Button';
 import { 
     User, Mail, Package, Shield, Settings, LogOut, 
     ChevronRight, Clock, MapPin, Phone, CreditCard,
-    ShoppingBag, Wrench, Bell, AlertCircle
+    ShoppingBag, Wrench, Bell, AlertCircle, CheckCircle, Eye, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { buildApiUrl } from '../config/config';
 import { useShop } from '../context/ShopContext';
+import PortalWrapper from '../components/PortalWrapper';
 
 const DEPARTAMENTOS_COLOMBIA = [
     'Amazonas', 'Antioquia', 'Arauca', 'Atlántico', 'Bogotá D.C.', 'Bolívar', 'Boyacá', 
@@ -33,6 +34,8 @@ const Profile = () => {
     const [editData, setEditData] = useState({
         name: '', phone: '', address: '', city: '', department: '', idNumber: ''
     });
+    const [selectedTicket, setSelectedTicket] = useState(null);
+    const [authorizing, setAuthorizing] = useState(false);
     const { cart, formatPrice } = useShop();
 
     useEffect(() => {
@@ -167,11 +170,37 @@ const Profile = () => {
     ].sort((a, b) => new Date(b.date) - new Date(a.date));
 
     const getStatusColor = (status) => {
-        const s = status?.toLowerCase();
-        if (s?.includes('entregado') || s?.includes('completado') || s?.includes('ready')) return 'bg-green-100 text-green-700';
-        if (s?.includes('proceso') || s?.includes('diagnostico')) return 'bg-blue-100 text-blue-700';
-        if (s?.includes('cancelado')) return 'bg-red-100 text-red-700';
+        const s = status?.toUpperCase();
+        if (s === 'DELIVERED' || s?.includes('ENTREGADO') || s?.includes('COMPLETADO') || s === 'READY') return 'bg-green-100 text-green-700';
+        if (s === 'QUOTED' || s === 'AUTHORIZED') return 'bg-purple-100 text-purple-700';
+        if (s === 'REPAIRING' || s?.includes('REPARACION')) return 'bg-indigo-100 text-indigo-700';
+        if (s === 'DIAGNOSED' || s?.includes('DIAGNOSTICO')) return 'bg-blue-100 text-blue-700';
+        if (s?.includes('CANCELADO')) return 'bg-red-100 text-red-700';
         return 'bg-amber-100 text-amber-700';
+    };
+
+    const handleAuthorizeTicket = async () => {
+        if (!selectedTicket) return;
+        setAuthorizing(true);
+        try {
+            const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+            const res = await fetch(buildApiUrl(`/api/user/tickets/${selectedTicket.id}/authorize`), {
+                method: 'PUT',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                const updatedTickets = tickets.map(t => t.id === selectedTicket.id ? { ...t, status: 'AUTHORIZED', approvedByClient: true } : t);
+                setTickets(updatedTickets);
+                setSelectedTicket(null);
+                alert('Ticket autorizado exitosamente. Ahora puedes esperar a que realicen la reparación.');
+            } else {
+                alert('Error al autorizar ticket');
+            }
+        } catch (error) {
+            alert('Error al autorizar ticket');
+        } finally {
+            setAuthorizing(false);
+        }
     };
 
     return (
@@ -354,6 +383,8 @@ const Profile = () => {
                                                     if (item.type === 'order') {
                                                         setSelectedOrder(item);
                                                         fetchOrderItems(item.id);
+                                                    } else if (item.type === 'ticket') {
+                                                        setSelectedTicket(item);
                                                     }
                                                 }}
                                             >
@@ -497,6 +528,133 @@ const Profile = () => {
                                     >
                                         Imprimir Recibo
                                     </Button>
+                                </div>
+                            </motion.div>
+                        </div>
+                    )}
+                </AnimatePresence>
+
+                {/* Ticket Detail Modal */}
+                <AnimatePresence>
+                    {selectedTicket && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                            <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                exit={{ opacity: 0 }}
+                                onClick={() => setSelectedTicket(null)}
+                                className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+                            />
+                            <motion.div 
+                                initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                                animate={{ scale: 1, opacity: 1, y: 0 }}
+                                exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                                className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl relative z-10 overflow-hidden max-h-[90vh] flex flex-col"
+                            >
+                                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                                    <div>
+                                        <h3 className="text-2xl font-black text-slate-900">Detalle del Servicio</h3>
+                                        <p className="text-slate-500 font-bold uppercase tracking-widest text-[10px] mt-1">
+                                            #{selectedTicket.id.toString().padStart(5, '0')} • {new Date(selectedTicket.createdAt).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => setSelectedTicket(null)}
+                                        className="p-2 hover:bg-slate-200 rounded-full transition-colors"
+                                    >
+                                        <LogOut className="w-6 h-6 text-slate-500 rotate-180" />
+                                    </button>
+                                </div>
+
+                                <div className="p-8 overflow-y-auto flex-1 space-y-6">
+                                    <div className="bg-slate-50 p-4 rounded-xl">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs font-bold text-slate-400 uppercase">Estado</span>
+                                            <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${getStatusColor(selectedTicket.status)}`}>
+                                                {selectedTicket.status === 'QUOTED' ? 'Por Autorizar' : selectedTicket.status === 'AUTHORIZED' ? 'Autorizado' : selectedTicket.status}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                                            <p className="text-xs font-bold text-slate-400 uppercase">Dispositivo</p>
+                                            <p className="font-bold text-slate-900">{selectedTicket.deviceType}</p>
+                                            <p className="text-sm text-slate-500">{selectedTicket.brand} {selectedTicket.model}</p>
+                                        </div>
+                                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                                            <p className="text-xs font-bold text-slate-400 uppercase">Serial</p>
+                                            <p className="font-bold text-slate-900 font-mono text-sm">{selectedTicket.serial || 'N/A'}</p>
+                                        </div>
+                                    </div>
+
+                                    {selectedTicket.issueDescription && (
+                                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                                            <p className="text-xs font-bold text-slate-400 uppercase mb-2">Falla Reportada</p>
+                                            <p className="text-sm text-slate-700">{selectedTicket.issueDescription}</p>
+                                        </div>
+                                    )}
+
+                                    {selectedTicket.diagnosis && (
+                                        <div className="bg-white p-4 rounded-xl border border-slate-100">
+                                            <p className="text-xs font-bold text-slate-400 uppercase mb-2">Diagnóstico</p>
+                                            <p className="text-sm text-slate-700">{selectedTicket.diagnosis}</p>
+                                        </div>
+                                    )}
+
+                                    {selectedTicket.estimatedCost > 0 && (
+                                        <div className="bg-green-50 p-4 rounded-xl border border-green-100">
+                                            <p className="text-xs font-bold text-green-600 uppercase mb-2">Presupuesto</p>
+                                            <p className="text-2xl font-black text-green-700">{formatPrice(selectedTicket.estimatedCost)}</p>
+                                        </div>
+                                    )}
+
+                                    {selectedTicket.status === 'QUOTED' && (
+                                        <div className="bg-purple-50 p-6 rounded-xl border border-purple-200 space-y-4">
+                                            <div className="flex items-start gap-3">
+                                                <AlertCircle className="w-6 h-6 text-purple-600 mt-0.5" />
+                                                <div>
+                                                    <p className="font-bold text-purple-900">Tu autorización requerida</p>
+                                                    <p className="text-sm text-purple-700">Revisa el presupuesto y autoriza el servicio para comenzar la reparación.</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => {
+                                                    const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+                                                    window.open(buildApiUrl(`/api/customer-reports/${selectedTicket.id}/preview?token=${token}`), '_blank');
+                                                }}
+                                                className="w-full py-3 bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                                            >
+                                                <Eye className="w-5 h-5" />
+                                                Ver Informe Técnico
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-4">
+                                    <Button 
+                                        variant="outline" 
+                                        className="flex-1 py-4 font-bold"
+                                        onClick={() => setSelectedTicket(null)}
+                                    >
+                                        Cerrar
+                                    </Button>
+                                    {selectedTicket.status === 'QUOTED' && (
+                                        <Button 
+                                            variant="primary" 
+                                            className="flex-1 py-4 font-bold shadow-lg shadow-purple-500/20"
+                                            onClick={handleAuthorizeTicket}
+                                            disabled={authorizing}
+                                        >
+                                            {authorizing ? 'Autorizando...' : (
+                                                <>
+                                                    <CheckCircle className="w-5 h-5 mr-2" />
+                                                    Autorizar Servicio
+                                                </>
+                                            )}
+                                        </Button>
+                                    )}
                                 </div>
                             </motion.div>
                         </div>

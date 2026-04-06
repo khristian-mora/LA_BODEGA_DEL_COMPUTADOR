@@ -128,6 +128,22 @@ const AdminAppointments = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        
+        if (!formData.customerId) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar un cliente', type: 'error' });
+            return;
+        }
+        
+        if (!formData.serviceType || formData.serviceType.length < 2) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar un tipo de servicio', type: 'error' });
+            return;
+        }
+        
+        if (!formData.scheduledDate) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar fecha y hora', type: 'error' });
+            return;
+        }
+        
         setLoading(true);
         try {
             if (editingAppointment) {
@@ -143,7 +159,7 @@ const AdminAppointments = () => {
             fetchAppointments();
             fetchStatistics();
         } catch (error) {
-            showAlert({ title: 'Error', message: error.message, type: 'error' });
+            showAlert({ title: 'Error', message: error.message || 'Error desconocido', type: 'error' });
         } finally {
             setLoading(false);
         }

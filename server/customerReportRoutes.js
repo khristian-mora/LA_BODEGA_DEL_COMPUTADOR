@@ -1,82 +1,52 @@
 // Customer Report Generation
 import { db } from './db.js';
-import nodemailer from 'nodemailer';
+import { sendEmail } from './mail.js';
+import { safeParse } from './utils.js';
 
-// Helper to fetch settings from DB
-const getSetting = (key, defaultValue = '') => {
-    return new Promise((resolve) => {
-        db.get('SELECT value FROM settings WHERE key = ?', [key], (err, row) => {
-            if (err || !row) resolve(defaultValue);
-            else resolve(row.value);
-        });
-    });
-};
-
-// Email transporter configuration
-const transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: process.env.SMTP_PORT || 587,
-    secure: false,
-    auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-    }
-});
-
-// Helper to ensure absolute URLs for images
+// Helper for absolute URLs
 const getAbsoluteUrl = (path, baseUrl) => {
     if (!path) return '';
-    // If it's already a full URL or Base64 data, return as-is
     if (path.startsWith('http') || path.startsWith('data:')) return path;
-    
-    const cleanBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
-    const cleanPath = path.startsWith('/') ? path : '/' + path;
-    return `${cleanBase}${cleanPath}`;
+    return `${baseUrl}${path.startsWith('/') ? '' : '/'}${path}`;
 };
 
-// Generate HTML report for customer
-const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
-    const quoteItems = ticket.quoteItems ? (typeof ticket.quoteItems === 'string' ? JSON.parse(ticket.quoteItems) : ticket.quoteItems) : [];
-    const businessName = settings.businessName || 'LA BODEGA DEL COMPUTADOR';
-    const businessAddress = settings.businessAddress || 'Cl. 49 #13-13, Barrancabermeja';
-    const businessPhone = settings.whatsappNumber || '+57 317 653 2488';
-    const businessEmail = settings.businessEmail || 'ventas@labodegadelcomputador.com';
-    const businessDomain = settings.businessDomain || 'www.labodegadelcomputador.com';
+// Generate HTML report for customers
+const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
+    const { 
+        businessName = 'LA BODEGA DEL COMPUTADOR', 
+        businessAddress = '', 
+        whatsappNumber = '', 
+        businessEmail = '', 
+        businessDomain = '' 
+    } = settings;
+    const businessPhone = whatsappNumber;
+
+    const quoteItems = safeParse(ticket.quoteItems);
+    const status = ticket.status || 'RECEIVED';
+
+    // const statusLabels = { RECEIVED: 'Recibido', DIAGNOSED: 'Diagnosticado', QUOTED: 'Cotizado', AUTHORIZED: 'Autorizado', REJECTED: 'Rechazado (No Autorizado)', REPAIRING: 'En Reparación', READY: 'Listo para Entrega', DELIVERED: 'Entregado' };
+    const statusPhase = { RECEIVED: 1, DIAGNOSED: 2, QUOTED: 3, AUTHORIZED: 4, REJECTED: 4, REPAIRING: 5, READY: 6, DELIVERED: 7 };
+    const currentPhase = statusPhase[status] || 1;
 
     // Parse findings and recommendations
-    let findings = [];
-    let recommendations = [];
-    try {
-        findings = typeof ticket.findings === 'string' ? JSON.parse(ticket.findings) : (ticket.findings || []);
-        recommendations = typeof ticket.recommendations === 'string' ? JSON.parse(ticket.recommendations) : (ticket.recommendations || []);
-    } catch {
-        findings = [];
-        recommendations = [];
-    }
+    const findings = safeParse(ticket.findings);
+    const recommendations = safeParse(ticket.recommendations);
 
     // Parse damage photos (fotos del daño)
-    let damagePhotos = [];
-    try {
-        damagePhotos = typeof ticket.damagePhotos === 'string' ? JSON.parse(ticket.damagePhotos) : (ticket.damagePhotos || []);
-        damagePhotos = damagePhotos.filter(p => p && !p.startsWith('blob:'));
-    } catch {
-        damagePhotos = [];
-    }
+    const damagePhotos = safeParse(ticket.damagePhotos).filter(p => p && !p.startsWith('blob:'));
 
-    // Labor cost
-    const laborCost = parseInt(ticket.laborCost) || 0;
+    // Labor items
+    const laborItems = safeParse(ticket.laborItems);
+    const totalLaborCost = laborItems.reduce((sum, item) => sum + (item.price || 0), 0);
+    const laborCost = totalLaborCost || parseInt(ticket.laborCost) || 0;
 
     // Parse photos - merge DB evidence with legacy photosIntake
     let photos = [];
     try {
-        const legacyPhotos = typeof ticket.photosIntake === 'string' ? JSON.parse(ticket.photosIntake) : (ticket.photosIntake || []);
-        // Only keep valid local URLs or files, filter out broken blob URLs
+        const legacyPhotos = safeParse(ticket.photosIntake);
         const validLegacy = legacyPhotos.filter(p => p && !p.startsWith('blob:'));
-        
-        // Add DB Evidence if available (use dataUrl directly for report)
         const dbEvidence = ticket.dbEvidence || [];
         const evidenceData = dbEvidence.map(ev => ev.photo_data);
-        
         photos = [...validLegacy, ...evidenceData];
     } catch {
         photos = [];
@@ -113,6 +83,48 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
             print-color-adjust: exact;
         }
 
+        @media print {
+            @page { margin: 0.5cm; size: A4; }
+            html, body { margin: 0 !important; padding: 0 !important; width: 100% !important; height: 100% !important; }
+            body { background: white !important; }
+            .report-wrapper { 
+                max-width: 100% !important; 
+                margin: 0 !important; 
+                box-shadow: none !important; 
+                width: 100% !important;
+            }
+            .cover-page { 
+                height: 90vh !important; 
+                min-height: 90vh !important;
+                page-break-after: always;
+                padding: 40px 50px !important;
+                color: white !important;
+                display: flex !important;
+                flex-direction: column !important;
+                justify-content: space-between !important;
+            }
+            .cover-gradient { opacity: 0.5 !important; }
+            .cover-content { position: relative; z-index: 10; }
+            .cover-brand { margin-bottom: 25px !important; gap: 12px !important; }
+            .cover-logo-box { width: 45px !important; height: 45px !important; border-radius: 10px !important; box-shadow: none !important; }
+            .cover-logo-box svg { width: 22px !important; height: 22px !important; }
+            .cover-brand h2 { font-size: 18px !important; }
+            .cover-tag { font-size: 10px !important; padding: 5px 12px !important; margin-bottom: 12px !important; }
+            .cover-title { font-size: 36px !important; line-height: 1.1 !important; }
+            .cover-subtitle { font-size: 14px !important; }
+            .cover-tech { font-size: 16px !important; margin-top: 15px !important; }
+            .cover-main { margin-top: 30px !important; }
+            .cover-footer-info { font-size: 10px !important; }
+            .cover-footer { margin-top: 25px !important; }
+            .report-info-grid { gap: 15px !important; }
+            .report-info-card { padding: 12px !important; border-radius: 4px !important; }
+            .report-section { padding: 15px 0 !important; }
+            .report-section-header { font-size: 10px !important; margin-bottom: 8px !important; }
+            .signature-section { margin-top: 20px !important; page-break-inside: avoid; }
+            .footer { display: block !important; }
+            .no-print { display: none !important; }
+        }
+
         .report-wrapper {
             max-width: 900px;
             margin: 40px auto;
@@ -138,10 +150,18 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
             position: absolute;
             inset: 0;
             z-index: 1;
-            background-image: url('${getAbsoluteUrl('https://images.unsplash.com/photo-1597872200969-2b65d56bd16b?auto=format&fit=crop&w=1920&q=80', baseUrl)}');
+            background-image: url('/images/tech-service-bg.jpg');
             background-size: cover;
             background-position: center;
             opacity: 0.4;
+        }
+
+        @media print {
+            .cover-bg {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+                opacity: 0.3 !important;
+            }
         }
 
         .cover-gradient {
@@ -217,6 +237,14 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
             max-width: 500px;
             line-height: 1.5;
             font-weight: 500;
+        }
+
+        .cover-tech {
+            font-size: 22px;
+            font-weight: 700;
+            margin-top: 30px;
+            color: white;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.3);
         }
 
         .cover-footer {
@@ -539,7 +567,7 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
 </head>
 <body>
     <div class="report-wrapper">
-        <!-- Portada Premium Revertida -->
+        <!-- Portada Premium -->
         <div class="cover-page">
             <div class="cover-bg"></div>
             <div class="cover-gradient"></div>
@@ -556,6 +584,7 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
                     <div class="cover-tag">Laboratorio Técnico Oficial</div>
                     <h1 class="cover-title">REPORTE DE<br>SERVICIO TÉCNICO</h1>
                     <p class="cover-subtitle">Informe profesional de diagnóstico, intervención y certificación de hardware/software.</p>
+                    ${ticket.technicianName ? `<div class="cover-tech">Presentado por Ing. ${ticket.technicianName}</div>` : ''}
                 </div>
             </div>
 
@@ -610,25 +639,61 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
                         <label>Identificación Serial</label>
                         <span>${ticket.serial || 'N/A'}</span>
                     </div>
+                    ${ticket.deviceConditions ? `
+                    <div class="info-item">
+                        <label>Condición Visual</label>
+                        <span>${ticket.deviceConditions}</span>
+                    </div>
+                    ` : ''}
                     <div class="info-item">
                         <label>Falla Reportada</label>
                         <span>${ticket.issueDescription}</span>
                     </div>
+                    ${ticket.estimatedDeliveryDate ? `
+                    <div class="info-item">
+                        <label>Fecha Estimada de Entrega</label>
+                        <span style="color: var(--primary); font-weight: 800;">${new Date(ticket.estimatedDeliveryDate).toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+                    </div>
+                    ` : ''}
                 </div>
             </div>
 
             <!-- Diagnosis -->
+            ${currentPhase >= 2 ? `
             <div class="section" style="margin-bottom: 40px;">
                 <div class="card-title">Análisis y Diagnóstico Técnico</div>
                 <div class="highlight-box">
                     ${ticket.diagnosis || 'Pendiente de diagnóstico final.'}
                 </div>
+                ${ticket.technicianNotes ? `<div style="margin-top: 15px; padding: 15px; background: #fefce8; border-radius: 8px; border-left: 3px solid #eab308;">
+                    <strong style="font-size: 11px; color: #854d0e;">NOTAS DEL TÉCNICO:</strong>
+                    <p style="margin: 5px 0 0 0; font-size: 13px; color: #713f12;">${ticket.technicianNotes}</p>
+                </div>` : ''}
             </div>
+            ` : ''}
 
-            <!-- Evidence -->
+            <!-- Findings & Recommendations -->
+            ${currentPhase >= 2 ? `
+            <div class="info-grid" style="margin-bottom: 40px;">
+                <div>
+                    <div class="card-title">Hallazgos</div>
+                    <div style="font-size: 14px; padding-left: 10px; border-left: 2px solid var(--border);">
+                        ${findings.length > 0 ? findings.map(f => `<div style="margin-bottom: 8px;">• ${f}</div>`).join('') : 'Sin hallazgos registrados.'}
+                    </div>
+                </div>
+                <div>
+                    <div class="card-title">Recomendaciones</div>
+                    <div style="font-size: 14px; padding-left: 10px; border-left: 2px solid var(--border);">
+                        ${recommendations.length > 0 ? recommendations.map(r => `<div style="margin-bottom: 8px;">• ${r}</div>`).join('') : 'Sin recomendaciones específicas.'}
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- Evidence Photos -->
             ${photos.length > 0 ? `
             <div class="section" style="margin-bottom: 40px;">
-                <div class="card-title">Evidencia Técnica (Estado de Recepción / Hallazgos)</div>
+                <div class="card-title">Evidencia Técnica (Estado de Recepción)</div>
                 <div class="evidence-grid">
                     ${photos.map(url => `
                         <div class="photo-frame">
@@ -639,24 +704,8 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
             </div>
             ` : ''}
 
-            <!-- Recommendations & Findings -->
-            <div class="info-grid" style="margin-bottom: 40px;">
-                <div>
-                    <div class="card-title">Observaciones</div>
-                    <div style="font-size: 14px; padding-left: 10px; border-left: 2px solid var(--border);">
-                        ${findings.length > 0 ? findings.map(f => `<div style="margin-bottom: 8px;">• ${f}</div>`).join('') : 'Sin observaciones adicionales.'}
-                    </div>
-                </div>
-                <div>
-                    <div class="card-title">Recomendaciones</div>
-                    <div style="font-size: 14px; padding-left: 10px; border-left: 2px solid var(--border);">
-                        ${recommendations.length > 0 ? recommendations.map(r => `<div style="margin-bottom: 8px;">• ${r}</div>`).join('') : 'Sin recomendaciones específicas.'}
-                    </div>
-                </div>
-            </div>
-
             <!-- Damage Photos -->
-            ${damagePhotos.length > 0 ? `
+            ${currentPhase >= 2 && damagePhotos.length > 0 ? `
             <div class="section" style="margin-bottom: 40px;">
                 <div class="card-title" style="color: #dc2626;">Evidencia del Daño / Falla Detectada</div>
                 <div class="evidence-grid">
@@ -669,21 +718,20 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
             </div>
             ` : ''}
 
-            <!-- Evidence -->
-            ${photos.length > 0 ? `
+            <!-- Repair Notes -->
+            ${currentPhase >= 5 && ticket.repairNotes ? `
             <div class="section" style="margin-bottom: 40px;">
-                <div class="card-title">Evidencia Técnica</div>
-                <div class="gallery">
-                    <div class="evidence-grid">
-                        ${photos.map(photo => `<img src="${getAbsoluteUrl(photo.url || photo, baseUrl)}" alt="Evidencia">`).join('')}
-                    </div>
+                <div class="card-title">Trabajos Realizados</div>
+                <div class="highlight-box" style="background: #fdf4ff; border-left-color: #a855f7;">
+                    ${ticket.repairNotes}
                 </div>
             </div>
             ` : ''}
 
-            <!-- Costs -->
+            <!-- Quote/Costs -->
+            ${currentPhase >= 2 ? `
             <div class="section">
-                <div class="card-title">Presupuesto de Intervención</div>
+                <div class="card-title">${status === 'REJECTED' ? 'Cargos de Revisión Técnica' : 'Presupuesto de Intervención'}</div>
                 <table class="modern-table">
                     <thead>
                         <tr>
@@ -700,74 +748,122 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
                             <td style="text-align: right; font-weight: 700;">$${(item.price * item.quantity).toLocaleString('es-CO')}</td>
                         </tr>
                         `).join('')}
-                        ${laborCost > 0 ? `
+                        ${laborItems.length > 0 ? laborItems.map(item => `
                         <tr style="background-color: #fef3c7;">
-                            <td style="font-weight: 700; color: #92400e;">Mano de Obra / Servicio Técnico</td>
+                            <td style="font-weight: 700; color: #92400e;">${item.description || 'Mano de Obra'}</td>
                             <td style="text-align: center">1</td>
-                            <td style="text-align: right; font-weight: 700; color: #92400e;">$${laborCost.toLocaleString('es-CO')}</td>
+                            <td style="text-align: right; font-weight: 700; color: #92400e;">$${(item.price || 0).toLocaleString('es-CO')}</td>
                         </tr>
-                        ` : ''}
-                        ${quoteItems.length === 0 && laborCost === 0 ? '<tr><td colspan="3" style="text-align: center; color: var(--text-light); font-style: italic; padding: 30px;">Costo estimado de mano de obra y repuestos generales.</td></tr>' : ''}
+                        `).join('') : ''}
+                        ${quoteItems.length === 0 && laborCost === 0 ? '<tr><td colspan="3" style="text-align: center; color: var(--text-light); font-style: italic; padding: 30px;">Pendiente de cotización.</td></tr>' : ''}
                     </tbody>
                 </table>
                 <div class="total-box">
                     <label>VALOR TOTAL DEL SERVICIO</label>
-                    <div class="price">$${parseInt(ticket.estimatedCost || 0).toLocaleString('es-CO')}</div>
+                    <div class="price">$${(quoteItems.reduce((s, i) => s + (i.price * i.quantity), 0) + laborCost).toLocaleString('es-CO')}</div>
                 </div>
-                ${(ticket.estimatedCost || 0) !== (laborCost + quoteItems.reduce((s, i) => s + (i.price * i.quantity), 0)) && (laborCost > 0 || quoteItems.length > 0) ? `
-                <div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 15px; margin-top: 15px; text-align: center;">
-                    <p style="font-size: 11px; color: #065f46; margin: 0;">
-                        <strong>Desglose:</strong> Repuestos: $${quoteItems.reduce((s, i) => s + (i.price * i.quantity), 0).toLocaleString('es-CO')} | 
-                        Mano de Obra: $${laborCost.toLocaleString('es-CO')} | 
-                        <strong>Total: $${(laborCost + quoteItems.reduce((s, i) => s + (i.price * i.quantity), 0)).toLocaleString('es-CO')}</strong>
-                    </p>
-                </div>
-                ` : ''}
                 <p style="font-size: 10px; color: var(--text-light); text-align: center; margin-top: 15px;">
                     * Precios expresados en Pesos Colombianos (COP). Validez de la cotización: 5 días hábiles.
                 </p>
             </div>
+            ` : ''}
 
+            <!-- Phase Signatures -->
+            ${currentPhase >= 4 && currentPhase < 6 ? `
             <div class="signature-section">
-                <!-- Administrative Signature -->
                 <div class="signature-box">
                     <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
                         <svg width="150" height="50" viewBox="0 0 150 50">
                             <path d="M10,35 Q30,10 50,35 T90,35 T130,20" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" opacity="0.8" />
-                            <path d="M20,40 Q40,15 60,30 T100,25" fill="none" stroke="#1e40af" stroke-width="1.5" stroke-linecap="round" opacity="0.6" />
                         </svg>
                     </div>
                     <div class="signature-name">GERENCIA TÉCNICA</div>
                     <div class="signature-label">Firma Autorizada LBDC</div>
                 </div>
-                <!-- Technician Signature -->
                 <div class="signature-box">
                     <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
                         <svg width="150" height="50" viewBox="0 0 150 50">
                             <path d="M20,30 C40,10 60,50 80,30 S120,40 140,20" fill="none" stroke="#1e293b" stroke-width="2" stroke-dasharray="2,1" opacity="0.7" />
-                            <text x="20" y="35" font-family="cursive" font-size="20" fill="#334155" opacity="0.5">${ticket.technicianName?.split(' ')[0] || 'Tech'}</text>
                         </svg>
                     </div>
                     <div class="signature-name">Ing. ${ticket.technicianName || 'Técnico Responsable'}</div>
                     <div class="signature-label">Especialista de Servicio</div>
                 </div>
             </div>
+            ` : ''}
 
+            <!-- Warranty Section (Only for DELIVERED repairs) -->
+            ${status === 'DELIVERED' && ticket.status !== 'REJECTED' ? `
+            <div class="section" style="margin-bottom: 40px; page-break-inside: avoid;">
+                <div class="card-title" style="color: #10b981; display: flex; align-items: center; gap: 10px;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                    Garantía de Reparación Activa
+                </div>
+                <div class="highlight-box" style="background: #f0fdf4; border-left-color: #10b981; padding: 25px; border-radius: 20px;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px;">
+                        <div>
+                            <p style="margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #065f46; font-weight: 800;">Estado de Protección</p>
+                            <p style="margin: 5px 0 0 0; font-size: 18px; font-weight: 900; color: #064e3b;">COBERTURA VIGENTE (90 DÍAS)</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <p style="margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em; color: #065f46; font-weight: 800;">Vence el Día</p>
+                            <p style="margin: 5px 0 0 0; font-size: 18px; font-weight: 900; color: #064e3b;">
+                                ${(() => {
+                                    const d = new Date();
+                                    d.setDate(d.getDate() + 90);
+                                    return d.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' }).toUpperCase();
+                                })()}
+                            </p>
+                        </div>
+                    </div>
+                    <div style="font-size: 12px; color: #065f46; line-height: 1.6; border-top: 1px solid #b7e4c7; padding-top: 15px; margin-top: 15px;">
+                        <p style="margin: 0;"><strong>Condiciones:</strong> Esta cobertura protege contra fallos de mano de obra y componentes remplazados. No aplica ante daños fortuitos, golpes o exposición a líquidos.</p>
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- Final Delivery Signatures -->
+            ${currentPhase >= 6 ? `
+            <div class="signature-section">
+                <div class="signature-box">
+                    <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
+                        <svg width="150" height="50" viewBox="0 0 150 50">
+                            <path d="M10,35 Q30,10 50,35 T90,35 T130,20" fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" opacity="0.8" />
+                        </svg>
+                    </div>
+                    <div class="signature-name">CENTRO DE SERVICIOS</div>
+                    <div class="signature-label">La Bodega del Computador</div>
+                </div>
+                <div class="signature-box">
+                    <div style="height: 60px; display: flex; align-items: center; justify-content: center; margin-bottom: 10px;">
+                        <svg width="150" height="50" viewBox="0 0 150 50">
+                            <path d="M20,30 Q40,15 80,40" fill="none" stroke="#1e293b" stroke-width="2" opacity="0.7" />
+                        </svg>
+                    </div>
+                    <div class="signature-name">${ticket.clientName}</div>
+                    <div class="signature-label">Cliente - Recibí Conforme</div>
+                </div>
+            </div>
+            ` : ''}
+
+            <!-- Políticas -->
+            ${currentPhase >= 2 ? `
             <div class="policy-section">
                 <div class="policy-grid">
                     <div>
                         <div class="policy-title">Políticas de Garantía</div>
-                        • <strong>Hardware Nuevo:</strong> 12 meses de garantía oficial según fabricante.<br>
-                        • <strong>Servicio Técnico:</strong> 30 días de garantía sobre la reparación específica realizada.<br>
-                        • <strong>Exclusiones:</strong> Daños por humedad, picos de voltaje, sellos alterados o manipulación externa.<br>
-                        • <strong>Requisito:</strong> Presentar este documento físico o digital para cualquier reclamación.
+                        • <strong>Hardware Nuevo:</strong> 12 meses de garantía oficial fabricante.<br>
+                        • <strong>Servicio Técnico:</strong> 30 días sobre labor realizada.<br>
+                        • <strong>Exclusiones:</strong> Humedad, golpes, manipulación externa.<br>
                     </div>
                     <div>
                         <div class="policy-title">Nota de Responsabilidad</div>
-                        Al retirar el equipo, el cliente acepta que ha sido probado a satisfacción. LBDC no se hace responsable por pérdida de datos no respaldados. Equipos no retirados en 90 días entran en proceso de abandono legal.
+                        Al retirar el equipo, el cliente acepta satisfacción. Equipos no retirados en 90 días entran en abandono legal.
                     </div>
                 </div>
             </div>
+            ` : ''}
 
             <!-- Footer -->
             <div class="footer">
@@ -775,7 +871,7 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
                     PBX: ${businessPhone} | ${businessAddress} | ${businessEmail}
                 </div>
                 <div style="margin-top: 5px; font-weight: 800; color: var(--secondary);">${businessDomain}</div>
-                <div style="margin-top: 15px; opacity: 0.6;">${businessName} © ${new Date().getFullYear()} - Soluciones Tecnológicas de Excelencia</div>
+                <div style="margin-top: 15px; opacity: 0.6;">${businessName} © ${new Date().getFullYear()}</div>
             </div>
         </div>
     </div>
@@ -787,133 +883,103 @@ const generateCustomerReport = (ticket, baseUrl = '', settings = {}) => {
 // Send report to customer
 export const sendCustomerReport = async (req, res) => {
     const { ticketId } = req.params;
-
     try {
-        // Fetch settings for branding
         const settingsKeys = ['businessName', 'businessAddress', 'whatsappNumber', 'businessEmail', 'businessDomain'];
         const settings = {};
         for (const key of settingsKeys) {
-            settings[key] = await getSetting(key);
+            settings[key] = await new Promise(r => {
+                db.get('SELECT value FROM settings WHERE key = ?', [key], (err, row) => r(row?.value || ''));
+            });
         }
 
-        // Get ticket details with technician name and evidence
         const ticket = await new Promise((resolve, reject) => {
-            const query = `
-                SELECT t.*, u.name as technicianName 
-                FROM tickets t 
-                LEFT JOIN users u ON t.assignedTo = u.id 
-                WHERE t.id = ?
-            `;
-            db.get(query, [ticketId], (err, row) => {
+            db.get(`SELECT t.*, u.name as technicianName FROM tickets t LEFT JOIN users u ON t.assignedTo = u.id WHERE t.id = ?`, [ticketId], (err, row) => {
                 if (err) return reject(err);
                 if (!row) return resolve(null);
-
-                // Fetch real evidence from DB
-                db.all('SELECT id FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
-                    if (!evErr) row.dbEvidence = evRows;
+                db.all('SELECT photo_data FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
+                    row.dbEvidence = evRows || [];
                     resolve(row);
                 });
             });
         });
 
-        if (!ticket) {
-            return res.status(404).json({ error: 'Ticket no encontrado' });
-        }
+        if (!ticket) return res.status(404).json({ error: 'Ticket no encontrado' });
 
-        // Generate HTML report
         const host = req.get('host');
         const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const baseUrl = `${protocol}://${host}`;
         const htmlReport = generateCustomerReport(ticket, baseUrl, settings);
 
-        // Send email with attachment
-        const mailOptions = {
-            from: process.env.SMTP_FROM || 'LA BODEGA DEL COMPUTADOR <noreply@labodega.com>',
+        await sendEmail({
             to: req.body.email || ticket.clientEmail,
-            subject: `Reporte de Servicio #${ticket.id} - LA BODEGA DEL COMPUTADOR`,
+            subject: `Cotización de Reparación #${ticket.id} - Tu equipo necesita atención`,
             html: `
-                <div style="font-family: sans-serif; color: #333; max-width: 600px; margin: 0 auto; border: 1px solid #eee; border-radius: 10px; overflow: hidden;">
-                    <div style="background: #0f172a; padding: 30px; text-align: center; border-bottom: 5px solid #6366f1;">
-                        <h2 style="color: white; margin: 0;">Reporte Tecnico Listo</h2>
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); padding: 30px; text-align: center; color: white;">
+                        <h1 style="margin: 0; font-size: 24px;">Cotización de Servicio Técnico</h1>
+                        <p style="margin: 10px 0 0 0;">Presupuesto para la reparación de tu equipo</p>
                     </div>
-                    <div style="padding: 30px; line-height: 1.6;">
-                        <p>Hola <strong>${ticket.clientName}</strong>,</p>
-                        <p>El departamento tecnico de <strong>LA BODEGA DEL COMPUTADOR</strong> ha finalizado el diagnostico y/o reparacion de tu equipo.</p>
-                        <p>Hemos adjuntado el reporte detallado en formato digital para tu revision.</p>
-                        <div style="background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                            <strong>Orden de Servicio:</strong> #${ticket.id}<br>
-                            <strong>Costo Estimado:</strong> $${ticket.estimatedCost || 0}
+                    <div style="padding: 30px; background: #f8fafc;">
+                        <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
+                        <p style="color: #64748b;">Hemos revisado tu equipo y este es el presupuesto estimado para la reparación:</p>
+                        
+                        <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h3 style="color: #1e293b; margin: 0 0 15px 0;">Equipo</h3>
+                            <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.brand} ${ticket.model || ''}</p>
+                            <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
+                            <p style="margin: 5px 0;"><strong>Falla:</strong> ${ticket.issueDescription}</p>
                         </div>
-                        <p>Si tienes alguna duda, puedes contactarnos respondiendo a este correo o via WhatsApp.</p>
+                        
+                        <div style="background: #fffbeb; border: 2px solid #f59e0b; padding: 15px; border-radius: 10px; margin: 20px 0;">
+                            <p style="margin: 0; font-size: 14px; color: #92400e;">💡 Revisa el reporte adjunto para ver el diagnóstico completo y el presupuesto detallado.</p>
+                        </div>
+                        
+                        <p style="color: #64748b; font-size: 14px;">¿Tienes alguna pregunta? Contáctanos para aclarar cualquier duda sobre la reparación.</p>
+                    </div>
+                    <div style="background: #1e293b; padding: 20px; text-align: center;">
+                        <p style="color: #94a3b8; margin: 0; font-size: 12px;">La Bodega del Computador | Soporte Técnico</p>
                     </div>
                 </div>
             `,
-            attachments: [
-                {
-                    filename: `Reporte-Soporte-LBDC-${ticket.id}.html`,
-                    content: htmlReport
-                }
-            ]
-        };
-
-        await transporter.sendMail(mailOptions);
-
-
-        res.json({
-            success: true,
-            message: 'Reporte enviado exitosamente',
-            sentTo: mailOptions.to
+            attachments: [{ filename: `Cotizacion-LBDC-${ticket.id}.html`, content: htmlReport }],
+            type: 'soporte'
         });
 
+        res.json({ success: true, message: 'Reporte enviado' });
     } catch (error) {
-        console.error('Error sending report:', error);
+        console.error('Error:', error);
         res.status(500).json({ error: error.message });
     }
 };
 
-// Preview report (for testing)
+// Preview report
 export const previewCustomerReport = (req, res) => {
     const { ticketId } = req.params;
-
-    // Fetch settings for branding
     const settingsKeys = ['businessName', 'businessAddress', 'whatsappNumber', 'businessEmail', 'businessDomain'];
     const settings = {};
     
-    const fetchFullTicket = async () => {
+    const fetch = async () => {
         for (const key of settingsKeys) {
-            settings[key] = await getSetting(key);
+            settings[key] = await new Promise(r => {
+                db.get('SELECT value FROM settings WHERE key = ?', [key], (err, row) => r(row?.value || ''));
+            });
         }
-
-        return new Promise((resolve) => {
-            const query = `
-                SELECT t.*, u.name as technicianName 
-                FROM tickets t 
-                LEFT JOIN users u ON t.assignedTo = u.id 
-                WHERE t.id = ?
-            `;
-            db.get(query, [ticketId], (err, row) => {
-                if (err || !row) return resolve(null);
-
-                // Fetch real evidence from DB (including photo_data)
-                db.all('SELECT photo_data, created_at FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
-                    if (!evErr) row.dbEvidence = evRows || [];
+        return new Promise(resolve => {
+            db.get(`SELECT t.*, u.name as technicianName FROM tickets t LEFT JOIN users u ON t.assignedTo = u.id WHERE t.id = ?`, [ticketId], (err, row) => {
+                if (!row) return resolve(null);
+                db.all('SELECT photo_data FROM ticket_evidence WHERE ticket_id = ?', [ticketId], (evErr, evRows) => {
+                    row.dbEvidence = evRows || [];
                     resolve(row);
                 });
             });
         });
     };
 
-    fetchFullTicket().then(ticket => {
-        if (!ticket) {
-            res.status(404).json({ error: 'Ticket no encontrado' });
-            return;
-        }
-
+    fetch().then(ticket => {
+        if (!ticket) return res.status(404).send('No encontrado');
         const host = req.get('host');
         const protocol = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
         const baseUrl = `${protocol}://${host}`;
-        const htmlReport = generateCustomerReport(ticket, baseUrl, settings);
-        res.setHeader('Content-Type', 'text/html');
-        res.send(htmlReport);
+        res.send(generateCustomerReport(ticket, baseUrl, settings));
     });
 };

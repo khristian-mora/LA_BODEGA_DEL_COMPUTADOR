@@ -148,6 +148,22 @@ const AdminWarranties = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        
+        if (!formData.customerId) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar un cliente', type: 'error' });
+            return;
+        }
+        
+        if (!formData.startDate) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar fecha de inicio', type: 'error' });
+            return;
+        }
+        
+        if (!formData.endDate) {
+            showAlert({ title: 'Error', message: 'Debes seleccionar fecha de fin', type: 'error' });
+            return;
+        }
+        
         setLoading(true);
         try {
             const url = editingWarranty ? buildApiUrl(`/api/warranties/${editingWarranty.id}`) : buildApiUrl('/api/warranties');
@@ -157,7 +173,12 @@ const AdminWarranties = () => {
                 headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` },
                 body: JSON.stringify(formData)
             });
-            if (!response.ok) throw new Error('Failed to write repository changes');
+            
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.error || `Error ${response.status}: ${response.statusText}`);
+            }
+            
             showAlert({ title: 'Protocol Success', message: editingWarranty ? 'Warranty Updated' : 'Warranty Registered', type: 'success' });
             setShowForm(false);
             setEditingWarranty(null);

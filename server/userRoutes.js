@@ -426,6 +426,83 @@ export const getMyTickets = (req, res) => {
         })));
     });
 };
+
+// Autorizar ticket (cliente autoriza la reparación)
+export const authorizeTicket = (req, res) => {
+    const { id } = req.params;
+    const now = new Date().toISOString();
+    
+    db.run(`UPDATE tickets SET status = 'AUTHORIZED', approvedByClient = 1, updatedAt = ? WHERE id = ?`, 
+        [now, id], async function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            const { broadcastNotification } = require('./notificationRoutes.js');
+            const { sendEmail } = require('./mail.js');
+            
+            db.get('SELECT * FROM tickets WHERE id = ?', [id], async (err, ticket) => {
+                if (!err && ticket) {
+                    // Notificar a técnicos y admins
+                    db.all("SELECT id FROM users WHERE role = 'technician'", [], (err, techs) => {
+                        if (!err && techs) {
+                            techs.forEach(t => {
+                                broadcastNotification(t.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${id}`);
+                            });
+                        }
+                    });
+                    db.all("SELECT id FROM users WHERE role = 'admin'", [], (err, admins) => {
+                        if (!err && admins) {
+                            admins.forEach(a => {
+                                broadcastNotification(a.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${id}`);
+                            });
+                        }
+                    });
+                    
+                    // Enviar email de confirmación al cliente
+                    if (ticket.clientEmail) {
+                        const estimatedCost = ticket.estimatedCost || 0;
+                        const laborCost = ticket.laborCost || 0;
+                        const totalCost = estimatedCost + laborCost;
+                        
+                        await sendEmail({
+                            to: ticket.clientEmail,
+                            subject: `Ticket #${id.toString().padStart(5, '0')} - Autorización Confirmada | LBDC`,
+                            html: `
+                                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                                    <div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); padding: 30px; text-align: center;">
+                                        <h1 style="color: white; margin: 0; font-size: 24px;">✓ Autorización Confirmada</h1>
+                                        <p style="color: #94a3b8; margin: 10px 0 0 0;">La Bodega del Computador</p>
+                                    </div>
+                                    <div style="padding: 30px; background: #f8fafc;">
+                                        <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
+                                        <p style="color: #64748b;">Hemos recibido tu autorización para proceder con la reparación de tu equipo.</p>
+                                        
+                                        <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                            <h3 style="color: #1e293b; margin: 0 0 15px 0;">Detalles del Servicio</h3>
+                                            <p style="margin: 5px 0;"><strong>Ticket:</strong> #${id.toString().padStart(5, '0')}</p>
+                                            <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.deviceType} ${ticket.brand} ${ticket.model || ''}</p>
+                                            <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
+                                            <p style="margin: 5px 0;"><strong>Presupuesto:</strong> $${totalCost.toLocaleString('es-CO')}</p>
+                                        </div>
+                                        
+                                        <p style="color: #64748b; font-size: 14px;">Nuestro equipo técnico procederá con la reparación. Te notificaremos cuando el equipo esté listo para entrega.</p>
+                                        
+                                        <div style="text-align: center; margin-top: 30px;">
+                                            <a href="#" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold;">Ver Estado del Ticket</a>
+                                        </div>
+                                    </div>
+                                    <div style="background: #1e293b; padding: 20px; text-align: center;">
+                                        <p style="color: #94a3b8; margin: 0; font-size: 12px;">© 2024 La Bodega del Computador. Todos los derechos reservados.</p>
+                                    </div>
+                                </div>
+                            `
+                        });
+                    }
+                }
+            });
+            
+            res.json({ success: true, message: 'Ticket autorizado exitosamente' });
+        });
+};
 // Auto-create user when a ticket is created (if not exists)
 export const autoCreateUserForTicket = async (ticketData) => {
     const { clientName, clientEmail, ticketId, deviceType, brand, model } = ticketData;

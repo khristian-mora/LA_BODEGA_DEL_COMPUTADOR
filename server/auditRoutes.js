@@ -157,11 +157,17 @@ export const exportAuditLogs = (req, res) => {
 // Create a new audit log entry (POST)
 export const logAction = (req, res) => {
     const { action, module, details, entityType, entityId, oldValue, newValue } = req.body;
-    if (!action) return res.status(400).json({ error: 'Action is required' });
+    if (!action) {
+        console.log('[AUDIT] No action provided, body:', req.body);
+        return res.status(400).json({ error: 'Action is required' });
+    }
+
+    const userId = req.user?.id || 0;
+    console.log('[AUDIT] Logging action:', { action, module, userId, details: typeof details });
 
     try {
         logActivity({
-            userId: req.user.id,
+            userId,
             action,
             module,
             entityType,
@@ -172,6 +178,7 @@ export const logAction = (req, res) => {
         });
         res.json({ success: true });
     } catch (error) {
+        console.error('[AUDIT] Error logging action:', error);
         res.status(500).json({ error: 'Failed to log action' });
     }
 };

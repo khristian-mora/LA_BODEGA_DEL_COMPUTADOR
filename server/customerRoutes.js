@@ -788,7 +788,7 @@ export const getBirthdayCustomers = (req, res) => {
 
 // Export Customers
 export const exportCustomers = (req, res) => {
-    const { format = 'json' } = req.query;
+    const { format } = req.query;
     
     const sql = `
         SELECT c.*, 
@@ -804,31 +804,31 @@ export const exportCustomers = (req, res) => {
     db.all(sql, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         
-        if (format === 'json') {
-            return res.json(rows);
+        if (format === 'csv') {
+            const headers = ['ID', 'Nombre', 'Email', 'Teléfono', 'Dirección', 'Ciudad', 'Cumpleaños', 'Tipo', 'Estado', 'Total_Servicios', 'Total_Gastado', 'Última_Visita', 'Notas'];
+            const csvRows = rows.map(row => [
+                row.id,
+                row.name,
+                row.email || '',
+                row.phone || '',
+                row.address || '',
+                row.city || '',
+                row.birthday || '',
+                row.customerType || 'Retail',
+                row.status || 'active',
+                row.totalTickets || 0,
+                row.totalSpent || 0,
+                row.lastVisit || '',
+                `"${(row.notes || '').replace(/"/g, '""')}"`
+            ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
+            
+            const csvContent = headers.join(',') + '\n' + csvRows.join('\n');
+            
+            res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+            res.setHeader('Content-Disposition', 'attachment; filename=clientes_export.csv');
+            return res.send('\ufeff' + csvContent);
         }
 
-        const headers = ['ID', 'Nombre', 'Email', 'Teléfono', 'Dirección', 'Ciudad', 'Cumpleaños', 'Tipo', 'Estado', 'Total_Servicios', 'Total_Gastado', 'Última_Visita', 'Notas'];
-        const csvRows = rows.map(row => [
-            row.id,
-            row.name,
-            row.email || '',
-            row.phone || '',
-            row.address || '',
-            row.city || '',
-            row.birthday || '',
-            row.customerType || 'Retail',
-            row.status || 'active',
-            row.totalTickets || 0,
-            row.totalSpent || 0,
-            row.lastVisit || '',
-            `"${(row.notes || '').replace(/"/g, '""')}"`
-        ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
-        
-        const csvContent = headers.join(',') + '\n' + csvRows.join('\n');
-        
-        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename=clientes_export.csv');
-        res.send('\ufeff' + csvContent);
+        res.json(rows);
     });
 };

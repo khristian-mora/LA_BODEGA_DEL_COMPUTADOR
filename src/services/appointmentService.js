@@ -135,8 +135,14 @@ export const createAppointment = async (data) => {
     });
     
     if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Error al crear cita');
+        let errorMessage = 'Error al crear cita';
+        try {
+            const error = await response.json();
+            errorMessage = error.error || error.message || errorMessage;
+        } catch (e) {
+            errorMessage = `Error ${response.status}: ${response.statusText}`;
+        }
+        throw new Error(errorMessage);
     }
     
     return response.json();

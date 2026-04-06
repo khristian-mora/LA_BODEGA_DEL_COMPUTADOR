@@ -130,5 +130,37 @@ export const ticketService = {
             console.error('Error deleting ticket:', error);
             return { success: false, error: error.message };
         }
+    },
+
+    getCustomFindings: async (type) => {
+        try {
+            const url = type ? `/api/custom-findings?type=${type}` : '/api/custom-findings';
+            const response = await fetch(buildApiUrl(url), {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('adminToken')}` }
+            });
+            if (!response.ok) throw new Error('Failed to fetch custom findings');
+            return await response.json();
+        } catch (error) {
+            console.error('Error fetching custom findings:', error);
+            return [];
+        }
+    },
+
+    addCustomFinding: async (type, value) => {
+        try {
+            const response = await fetch(buildApiUrl('/api/custom-findings'), {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${localStorage.getItem('adminToken')}`
+                },
+                body: JSON.stringify({ type, value })
+            });
+            if (!response.ok) throw new Error('Failed to add custom finding');
+            return await response.json();
+        } catch (error) {
+            console.error('Error adding custom finding:', error);
+            throw error;
+        }
     }
 };

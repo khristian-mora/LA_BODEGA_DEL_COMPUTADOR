@@ -24,17 +24,22 @@ export const getNotifications = (req, res) => {
 
 // Get unread count
 export const getUnreadCount = (req, res) => {
-    const userId = req.user.id;
+    try {
+        const userId = req.user.id;
 
-    const sql = 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND isRead = 0';
+        const sql = 'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND isRead = 0';
 
-    db.get(sql, [userId], (err, row) => {
-        if (err) {
-            res.status(500).json({ error: err.message });
-            return;
-        }
-        res.json({ count: row.count });
-    });
+        db.get(sql, [userId], (err, row) => {
+            if (err) {
+                console.error('[NOTIFICATIONS] getUnreadCount SQL Error:', err.message);
+                return res.status(500).json({ error: err.message });
+            }
+            res.json({ count: row?.count || 0 });
+        });
+    } catch (error) {
+        console.error('[NOTIFICATIONS] getUnreadCount Exception:', error);
+        res.status(500).json({ error: error.message });
+    }
 };
 
 // Mark notification as read
@@ -98,16 +103,26 @@ export const deleteNotification = (req, res) => {
 
 // Broadcast notification to all users with specific role
 export const broadcastNotification = (role, type, title, message, link = null) => {
-    const sql = 'SELECT id FROM users WHERE role = ? AND status = ?';
+    try {
+        const sql = 'SELECT id FROM users WHERE role = ? AND status = ?';
 
-    db.all(sql, [role, 'active'], (err, users) => {
-        if (err) {
-            console.error('Error broadcasting notification:', err);
-            return;
-        }
+        db.all(sql, [role, 'active'], (err, users) => {
+            if (err) {
+                console.error('[NOTIFICATION] broadcastNotification SQL Error:', err.message);
+                return;
+            }
 
-        users.forEach(user => {
-            createNotification(user.id, type, title, message, link);
+            if (!users || users.length === 0) {
+                console.log('[NOTIFICATION] broadcastNotification: No users found with role:', role);
+                return;
+            }
+
+            console.log('[NOTIFICATION] Broadcasting to', users.length, 'users with role:', role);
+            users.forEach(user => {
+                createNotification(user.id, type, title, message, link);
+            });
         });
-    });
+    } catch (error) {
+        console.error('[NOTIFICATION] broadcastNotification Exception:', error);
+    }
 };

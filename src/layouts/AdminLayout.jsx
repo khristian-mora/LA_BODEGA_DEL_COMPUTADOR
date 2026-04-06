@@ -9,7 +9,7 @@ import NotificationCenter from '../components/NotificationCenter';
 import { useAudit } from '../context/AuditContext';
 import { createPortal } from 'react-dom';
 
-const AdminLayout = ({ children, title, modal }) => {
+const AdminLayout = ({ children, title, modal, fullWidth = false }) => {
     const location = useLocation();
     const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
 
@@ -108,7 +108,7 @@ const AdminLayout = ({ children, title, modal }) => {
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 ml-0 lg:ml-64 transition-all duration-300 min-h-screen relative z-[10]">
+            <main className="flex-1 ml-0 lg:ml-64 transition-all duration-300 min-h-[calc(100vh-4rem)] relative z-[10] overflow-visible">
                 <header className="bg-white h-16 shadow-sm border-b border-gray-200 flex items-center justify-between px-4 lg:px-8 sticky top-0 z-[20]">
                     <div className="flex items-center gap-4">
                         <button
@@ -132,7 +132,7 @@ const AdminLayout = ({ children, title, modal }) => {
                     </div>
                 </header>
 
-                <div className="p-4 lg:p-8">
+                <div className={`w-full ${fullWidth ? '' : 'p-4 lg:p-8'}`}>
                     {children}
                 </div>
             </main>

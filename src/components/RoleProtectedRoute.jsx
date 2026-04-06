@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 
 /**
@@ -8,29 +8,72 @@ import { Navigate, useLocation } from 'react-router-dom';
  */
 const RoleProtectedRoute = ({ children, allowedRoles }) => {
     const location = useLocation();
-    const token = localStorage.getItem('adminToken');
-    const userStr = localStorage.getItem('adminUser');
+    const [loading, setLoading] = useState(true);
+    const [user, setUser] = useState(null);
     
-    // Si no está logueado, determinar a dónde redirigir según si la ruta original era de técnico
-    if (!token || !userStr) {
-        if (location.pathname.startsWith('/tech-login') || location.pathname.includes('/tech-service')) {
+    useEffect(() => {
+        const verifyUser = async () => {
+            const token = localStorage.getItem('adminToken');
+            const userStr = localStorage.getItem('adminUser');
+            
+            if (!token || !userStr) {
+                setUser(null);
+                setLoading(false);
+                return;
+            }
+            
+            try {
+                const userData = JSON.parse(userStr);
+                
+                const response = await fetch(`/api/users/${userData.id}`, {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                
+                if (response.ok) {
+                    const dbUser = await response.json();
+                    if (dbUser.role !== userData.role || dbUser.status !== 'active') {
+                        localStorage.removeItem('adminToken');
+                        localStorage.removeItem('adminUser');
+                        setUser(null);
+                    } else {
+                        setUser(dbUser);
+                    }
+                } else {
+                    localStorage.removeItem('adminToken');
+                    localStorage.removeItem('adminUser');
+                    setUser(null);
+                }
+            } catch (e) {
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('adminUser');
+                setUser(null);
+            }
+            setLoading(false);
+        };
+        
+        verifyUser();
+    }, []);
+    
+    if (loading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-12 h-12 border-4 border-slate-900 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-widest">Verificando permisos...</p>
+                </div>
+            </div>
+        );
+    }
+    
+    if (!user) {
+        if (location.pathname.includes('/tech-service')) {
             return <Navigate to="/tech-login" state={{ from: location }} replace />;
         }
         return <Navigate to="/admin/login" state={{ from: location }} replace />;
     }
-
-    let user = null;
-    try {
-        user = JSON.parse(userStr);
-    } catch (e) {
-        localStorage.removeItem('adminToken');
-        localStorage.removeItem('adminUser');
-        return <Navigate to="/admin/login" replace />;
-    }
     
-    // Verificar si el rol del usuario está permitido en esta ruta
     if (allowedRoles && !allowedRoles.includes(user.role)) {
-        if (user.role === 'técnico') {
+        if (user.role === 'técnico' || user.role === 'technician') {
             return <Navigate to="/admin/tech-service" replace />;
         }
         return <Navigate to="/admin" replace />;
