@@ -17,7 +17,8 @@ const Login = () => {
 
     React.useEffect(() => {
         const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
-        if (token) {
+        const user = localStorage.getItem('user');
+        if (token && user) {
             navigate('/profile');
         }
     }, [navigate]);
@@ -247,6 +248,7 @@ const Login = () => {
                                 <GoogleLoginButton 
                                     onSuccess={async (credential) => {
                                         setLoading(true);
+                                        setError(''); // Clear errors to stop any flickering UI
                                         try {
                                             const res = await fetch('/api/auth/google-login', {
                                                 method: 'POST',
@@ -255,9 +257,14 @@ const Login = () => {
                                             });
                                             const data = await res.json();
                                             if (res.ok) {
-                                                localStorage.setItem('adminToken', data.token);
+                                                const isClient = data.user.role === 'client' || !['admin', 'gerente', 'vendedor', 'técnico', 'rh', 'marketing', 'finanzas'].includes(data.user.role);
+                                                if (isClient) {
+                                                    localStorage.setItem('userToken', data.token);
+                                                } else {
+                                                    localStorage.setItem('adminToken', data.token);
+                                                }
                                                 localStorage.setItem('user', JSON.stringify(data.user));
-                                                navigate('/');
+                                                navigate(isClient ? '/profile' : '/admin');
                                             } else {
                                                 setError(data.error);
                                             }
@@ -267,7 +274,10 @@ const Login = () => {
                                             setLoading(false);
                                         }
                                     }}
-                                    onError={(err) => setError(err)}
+                                    onError={(err) => {
+                                        // Only set error if not already loading to prevent loops
+                                        if (!loading) setError(err);
+                                    }}
                                 />
 
                                 <p className="text-center text-sm text-gray-500 mt-6">

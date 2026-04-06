@@ -5,7 +5,8 @@ import Button from '../components/Button';
 import { 
     User, Mail, Package, Shield, Settings, LogOut, 
     ChevronRight, Clock, MapPin, Phone, CreditCard,
-    ShoppingBag, Wrench, Bell, AlertCircle, CheckCircle, Eye, X
+    ShoppingBag, Wrench, Bell, AlertCircle, CheckCircle, Eye, X,
+    FileText, Activity, ClipboardCheck, ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { buildApiUrl } from '../config/config';
@@ -44,6 +45,9 @@ const Profile = () => {
             const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
 
             if (!storedUser || !token) {
+                localStorage.removeItem('userToken');
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('user');
                 navigate('/login');
                 return;
             }
@@ -609,25 +613,75 @@ const Profile = () => {
                                         </div>
                                     )}
 
+                                    {/* Documentación del Servicio */}
+                                    <div className="space-y-3 pt-2">
+                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Documentación del Servicio</p>
+                                        
+                                        {/* Reporte de Ingreso - Siempre disponible */}
+                                        <button 
+                                            onClick={() => {
+                                                const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+                                                window.open(buildApiUrl(`/api/intake-receipts/${selectedTicket.id}/preview?token=${token}`), '_blank');
+                                            }}
+                                            className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold flex items-center justify-between transition-all group"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className="p-2 bg-white rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                                                    <FileText className="w-4 h-4 text-blue-500" />
+                                                </div>
+                                                <span>Reporte de Ingreso</span>
+                                            </div>
+                                            <ExternalLink className="w-4 h-4 opacity-40" />
+                                        </button>
+
+                                        {/* Reporte Técnico - Disponible si ya fue diagnosticado */}
+                                        {['DIAGNOSED', 'QUOTED', 'AUTHORIZED', 'REPAIRING', 'READY', 'DELIVERED'].includes(selectedTicket.status) && (
+                                            <button 
+                                                onClick={() => {
+                                                    const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+                                                    window.open(buildApiUrl(`/api/customer-reports/${selectedTicket.id}/preview?token=${token}`), '_blank');
+                                                }}
+                                                className="w-full py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold flex items-center justify-between transition-all group"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2 bg-white rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                                                        <Activity className="w-4 h-4 text-purple-500" />
+                                                    </div>
+                                                    <span>Reporte Técnico</span>
+                                                </div>
+                                                <ExternalLink className="w-4 h-4 opacity-40" />
+                                            </button>
+                                        )}
+
+                                        {/* Reporte de Entrega - Disponible si está listo o entregado */}
+                                        {['READY', 'DELIVERED'].includes(selectedTicket.status) && (
+                                            <button 
+                                                onClick={() => {
+                                                    const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
+                                                    window.open(buildApiUrl(`/api/delivery-receipts/${selectedTicket.id}/preview?token=${token}`), '_blank');
+                                                }}
+                                                className="w-full py-3 px-4 bg-green-50 hover:bg-green-100 text-green-700 rounded-xl font-bold flex items-center justify-between transition-all group border border-green-100"
+                                            >
+                                                <div className="flex items-center gap-3">
+                                                    <div className="p-2 bg-white rounded-lg shadow-sm group-hover:scale-110 transition-transform">
+                                                        <ClipboardCheck className="w-4 h-4 text-green-500" />
+                                                    </div>
+                                                    <span>Reporte de Entrega</span>
+                                                </div>
+                                                <ExternalLink className="w-4 h-4 opacity-40" />
+                                            </button>
+                                        )}
+                                    </div>
+
                                     {selectedTicket.status === 'QUOTED' && (
                                         <div className="bg-purple-50 p-6 rounded-xl border border-purple-200 space-y-4">
                                             <div className="flex items-start gap-3">
                                                 <AlertCircle className="w-6 h-6 text-purple-600 mt-0.5" />
                                                 <div>
                                                     <p className="font-bold text-purple-900">Tu autorización requerida</p>
-                                                    <p className="text-sm text-purple-700">Revisa el presupuesto y autoriza el servicio para comenzar la reparación.</p>
+                                                    <p className="text-sm text-purple-700">Revisa el presupuesto detallado y autoriza el servicio para proceder.</p>
                                                 </div>
                                             </div>
-                                            <button 
-                                                onClick={() => {
-                                                    const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
-                                                    window.open(buildApiUrl(`/api/customer-reports/${selectedTicket.id}/preview?token=${token}`), '_blank');
-                                                }}
-                                                className="w-full py-3 bg-indigo-500 text-white rounded-xl font-bold flex items-center justify-center gap-2"
-                                            >
-                                                <Eye className="w-5 h-5" />
-                                                Ver Informe Técnico
-                                            </button>
                                         </div>
                                     )}
                                 </div>

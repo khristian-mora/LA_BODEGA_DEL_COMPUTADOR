@@ -64,7 +64,7 @@ const Navbar = () => {
                         </button>
                         <Link 
                             to={localStorage.getItem('userToken') || localStorage.getItem('adminToken') ? "/profile" : "/login"} 
-                            className="p-2 hover:bg-gray-100 rounded-full transition-colors hidden md:block"
+                            className="p-2 hover:bg-gray-100 rounded-full transition-colors"
                         >
                             <User className="w-5 h-5 text-gray-700" />
                         </Link>
@@ -111,6 +111,16 @@ const Navbar = () => {
                             </motion.div>
                             <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
                                 <Link to="/accessories" className="text-lg font-medium" onClick={() => setIsMobileMenuOpen(false)}>Accesorios</Link>
+                            </motion.div>
+                            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="pt-4 border-t border-gray-100">
+                                <Link 
+                                    to={localStorage.getItem('userToken') || localStorage.getItem('adminToken') ? "/profile" : "/login"} 
+                                    className="text-lg font-bold flex items-center gap-2" 
+                                    onClick={() => setIsMobileMenuOpen(false)}
+                                >
+                                    <User className="w-5 h-5" />
+                                    {localStorage.getItem('userToken') || localStorage.getItem('adminToken') ? "Mi Perfil" : "Iniciar Sesión"}
+                                </Link>
                             </motion.div>
                         </motion.div>
                     )}

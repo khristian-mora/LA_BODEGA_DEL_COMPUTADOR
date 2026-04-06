@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { sendEmail } from './mail.js';
 import { OAuth2Client } from 'google-auth-library';
+import { createNotification } from './notificationRoutes.js';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
@@ -430,32 +431,29 @@ export const getMyTickets = (req, res) => {
 // Autorizar ticket (cliente autoriza la reparación)
 export const authorizeTicket = (req, res) => {
     const { id } = req.params;
-    const now = new Date().toISOString();
-    
-    db.run(`UPDATE tickets SET status = 'AUTHORIZED', approvedByClient = 1, updatedAt = ? WHERE id = ?`, 
-        [now, id], async function(err) {
-            if (err) return res.status(500).json({ error: err.message });
+            const now = new Date().toISOString();
             
-            const { broadcastNotification } = require('./notificationRoutes.js');
-            const { sendEmail } = require('./mail.js');
-            
-            db.get('SELECT * FROM tickets WHERE id = ?', [id], async (err, ticket) => {
-                if (!err && ticket) {
-                    // Notificar a técnicos y admins
-                    db.all("SELECT id FROM users WHERE role = 'technician'", [], (err, techs) => {
-                        if (!err && techs) {
-                            techs.forEach(t => {
-                                broadcastNotification(t.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${id}`);
+            db.run(`UPDATE tickets SET status = 'AUTHORIZED', approvedByClient = 1, updatedAt = ? WHERE id = ?`, 
+                [now, id], async function(err) {
+                    if (err) return res.status(500).json({ error: err.message });
+                    
+                    db.get('SELECT * FROM tickets WHERE id = ?', [id], async (err, ticket) => {
+                        if (!err && ticket) {
+                            // Notificar a técnicos y admins
+                            db.all("SELECT id FROM users WHERE role = 'technician' AND status = 'active'", [], (err, techs) => {
+                                if (!err && techs) {
+                                    techs.forEach(t => {
+                                        createNotification(t.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente. Equipo: ${ticket.deviceType} ${ticket.brand}`, `/admin/tech-service?ticket=${id}`);
+                                    });
+                                }
                             });
-                        }
-                    });
-                    db.all("SELECT id FROM users WHERE role = 'admin'", [], (err, admins) => {
-                        if (!err && admins) {
-                            admins.forEach(a => {
-                                broadcastNotification(a.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${id}`);
+                            db.all("SELECT id FROM users WHERE role = 'admin' AND status = 'active'", [], (err, admins) => {
+                                if (!err && admins) {
+                                    admins.forEach(a => {
+                                        createNotification(a.id, 'ticket', 'Ticket Autorizado', `El ticket #${id} ha sido autorizado por el cliente. Equipo: ${ticket.deviceType} ${ticket.brand}`, `/admin/tech-service?ticket=${id}`);
+                                    });
+                                }
                             });
-                        }
-                    });
                     
                     // Enviar email de confirmación al cliente
                     if (ticket.clientEmail) {
