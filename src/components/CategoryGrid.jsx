@@ -4,13 +4,18 @@ import { motion } from 'framer-motion';
 import { useSettings } from '../context/SettingsContext';
 import { buildUploadUrl } from '../config/config';
 
+// Import assets to ensure they are bundled in production
+import laptopHero from '../assets/hero_laptop.png';
+import gamingHero from '../assets/hero_gaming_pc.png';
+import accessoriesHero from '../assets/hero_kb_mouse.png';
+
 const CategoryGrid = () => {
     const { settings } = useSettings();
 
     const categories = [
-        { id: 1, name: 'Portátiles', image: settings.cat1_image || '/src/assets/hero_laptop.png', items: '120+ Modelos' },
-        { id: 2, name: 'PCs Gamer', image: settings.cat2_image || '/src/assets/hero_gaming_pc.png', items: 'Armados a medida' },
-        { id: 3, name: 'Accesorios', image: settings.cat3_image || '/src/assets/hero_kb_mouse.png', items: 'Teclados y más' },
+        { id: 1, name: 'Portátiles', image: settings.cat1_image || laptopHero, items: '120+ Modelos' },
+        { id: 2, name: 'PCs Gamer', image: settings.cat2_image || gamingHero, items: 'Armados a medida' },
+        { id: 3, name: 'Accesorios', image: settings.cat3_image || accessoriesHero, items: 'Teclados y más' },
     ];
     const containerVariants = {
         hidden: {},

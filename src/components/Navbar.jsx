@@ -33,10 +33,11 @@ const Navbar = () => {
                 <div className={`w-full px-6 md:px-12 h-20 flex items-center justify-between transition-all duration-300 ${isScrolled ? 'bg-white/80 backdrop-blur-md shadow-sm py-4' : 'bg-transparent py-6'}`}>
 
                     {/* Left: Logo */}
-                    <div className="flex-1 flex justify-start z-20">
-                        <Link to="/" className="text-xl font-bold tracking-tighter flex items-center gap-2">
+                    <div className="flex-initial w-72 flex justify-start z-20">
+                        <Link to="/" className="text-xl font-bold tracking-tighter flex items-center gap-3">
                             <Monitor className="w-8 h-8" />
-                            <span className="uppercase whitespace-nowrap">LA BODEGA DEL COMPUTADOR</span>
+                            <span className="uppercase whitespace-nowrap hidden xl:inline">LA BODEGA DEL COMPUTADOR</span>
+                            <span className="uppercase whitespace-nowrap xl:hidden">LBDC</span>
                         </Link>
                     </div>
 
