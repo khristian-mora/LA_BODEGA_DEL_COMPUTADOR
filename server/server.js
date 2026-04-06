@@ -130,14 +130,13 @@ app.use('/uploads', express.static(uploadDir));
 const uploadDisk = multer({ 
     storage: multer.diskStorage({
         destination: (req, file, cb) => cb(null, uploadDir),
-        filename: (req, file, cb) => cb(null, Date.now() + '-' + Math.round(Math.random() * 1E9) + path.extname(file.originalname))
     }),
-    limits: { fileSize: 5 * 1024 * 1024 }
+    limits: { fileSize: 20 * 1024 * 1024 }
 });
 
 const uploadBuffer = multer({ 
     storage: multer.memoryStorage(), 
-    limits: { fileSize: 10 * 1024 * 1024 } 
+    limits: { fileSize: 20 * 1024 * 1024 } 
 });
 
 // --- AUTH ROUTES ---
