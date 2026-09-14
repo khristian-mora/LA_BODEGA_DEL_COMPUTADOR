@@ -217,6 +217,7 @@ function initDb() {
                 db.run('ALTER TABLE tickets ADD COLUMN signatureIntakeClient TEXT', () => {});
                 db.run('ALTER TABLE tickets ADD COLUMN signatureDeliveryTech TEXT', () => {});
                 db.run('ALTER TABLE tickets ADD COLUMN signatureDeliveryClient TEXT', () => {});
+                db.run('ALTER TABLE tickets ADD COLUMN photosDelivery TEXT', () => {});
             }
         });
 

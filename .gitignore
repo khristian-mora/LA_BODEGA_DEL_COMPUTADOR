@@ -24,8 +24,10 @@ dist-ssr
 *.sw?
 
 # Database and Uploads
-database.sqlite
-server/database.sqlite
+database.sqlite*
+*.sqlite*
+server/*.sqlite*
+server/database.sqlite*
 uploads/
 server/uploads/
 .env

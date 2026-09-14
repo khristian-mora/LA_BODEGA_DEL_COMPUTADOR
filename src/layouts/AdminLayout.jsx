@@ -29,7 +29,7 @@ const AdminLayout = ({ children, title, modal, fullWidth = false }) => {
     const menuItems = [
         { path: '/admin', name: 'Dashboard', icon: LayoutDashboard, roles: ['admin', 'vendedor', 'gerente'] },
         { path: '/admin/users', name: 'Usuarios', icon: Users, roles: ['admin'] },
-        { path: '/admin/customers', name: 'Clientes', icon: UserCircle, roles: ['admin', 'vendedor'] },
+        { path: '/admin/customers', name: 'Clientes', icon: UserCircle, roles: ['admin', 'vendedor', 'técnico', 'tecnico', 'technician'] },
         { path: '/admin/appointments', name: 'Citas', icon: LayoutDashboard, roles: ['admin', 'vendedor', 'técnico'] },
         { path: '/admin/reports', name: 'Reportes', icon: BarChart3, roles: ['admin', 'gerente'] },
         { path: '/admin/warranties', name: 'Garantías', icon: Shield, roles: ['admin', 'técnico', 'vendedor'] },

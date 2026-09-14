@@ -31,7 +31,9 @@ const AdminCustomers = () => {
     const user = JSON.parse(localStorage.getItem('adminUser') || '{}');
     const userRole = user.role || 'técnico';
     const isAdmin = userRole === 'admin';
-    const canModify = isAdmin || userRole === 'vendedor';
+    const canCreateOrEdit = isAdmin || userRole === 'vendedor' || userRole === 'técnico' || userRole === 'tecnico' || userRole === 'technician';
+    const canImportOrExport = isAdmin || userRole === 'vendedor';
+    const canDelete = isAdmin;
 
     const [formData, setFormData] = useState({
         name: '', email: '', phone: '', address: '', idNumber: '', clientType: 'Persona', customerType: 'Regular', notes: '', birthday: ''
@@ -349,7 +351,7 @@ const AdminCustomers = () => {
                             <button onClick={fetchBirthdayCustomers} className="px-4 py-2 bg-amber-500 text-white text-xs font-bold rounded-lg flex items-center gap-2">
                                 <Calendar className="w-4 h-4" /> Cumpleaños
                             </button>
-                            {canModify && (
+                            {canImportOrExport && (
                                 <>
                                     <label className="px-4 py-2 bg-emerald-500 text-white text-xs font-bold rounded-lg flex items-center gap-2 cursor-pointer hover:bg-emerald-600 transition-all">
                                         <Upload className="w-4 h-4" /> Importar
@@ -363,7 +365,7 @@ const AdminCustomers = () => {
                                     </button>
                                 </>
                             )}
-                            {canModify && (
+                            {canCreateOrEdit && (
                                 <button onClick={() => { setEditingCustomer(null); resetForm(); setShowForm(true); }} className="px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg flex items-center gap-2">
                                     <Plus className="w-4 h-4" /> Nuevo
                                 </button>
@@ -420,12 +422,16 @@ const AdminCustomers = () => {
                                         <td className="px-3 py-2 text-gray-500 text-xs">{customer.idNumber || '-'}</td>
                                         <td className="px-3 py-2 text-right">
                                             <div className="flex gap-1 justify-end">
-                                                <button onClick={(e) => { e.stopPropagation(); handleEdit(customer); }} className="text-blue-600 hover:text-blue-800 p-1">
-                                                    <Edit2 className="w-3 h-3" />
-                                                </button>
-                                                <button onClick={(e) => { e.stopPropagation(); handleDelete(customer.id); }} className="text-red-600 hover:text-red-800 p-1">
-                                                    <Trash2 className="w-3 h-3" />
-                                                </button>
+                                                {canCreateOrEdit && (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleEdit(customer); }} className="text-blue-600 hover:text-blue-800 p-1">
+                                                        <Edit2 className="w-3 h-3" />
+                                                    </button>
+                                                )}
+                                                {canDelete && (
+                                                    <button onClick={(e) => { e.stopPropagation(); handleDelete(customer.id); }} className="text-red-600 hover:text-red-800 p-1">
+                                                        <Trash2 className="w-3 h-3" />
+                                                    </button>
+                                                )}
                                             </div>
                                         </td>
                                     </tr>

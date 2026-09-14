@@ -44,6 +44,9 @@ const Profile = () => {
             const token = localStorage.getItem('userToken') || localStorage.getItem('adminToken');
 
             if (!storedUser || !token) {
+                localStorage.removeItem('userToken');
+                localStorage.removeItem('adminToken');
+                localStorage.removeItem('user');
                 navigate('/login');
                 return;
             }

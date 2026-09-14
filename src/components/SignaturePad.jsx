@@ -1,10 +1,42 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 import SignatureCanvas from 'react-signature-canvas';
-import { Eraser, Check, X } from 'lucide-react';
+import { Eraser, Check } from 'lucide-react';
 import Button from './Button';
 
 const SignaturePad = ({ onSave, onClear, title = "Firma aqui" }) => {
     const sigPad = useRef(null);
+
+    const resizeCanvas = () => {
+        if (sigPad.current) {
+            const canvas = sigPad.current.getCanvas();
+            if (canvas) {
+                // Ajusta la resolución del canvas interno al tamaño de visualización
+                const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                const width = canvas.offsetWidth;
+                const height = canvas.offsetHeight;
+                
+                if (width > 0 && height > 0) {
+                    canvas.width = width * ratio;
+                    canvas.height = height * ratio;
+                    const context = canvas.getContext('2d');
+                    if (context) {
+                        context.scale(ratio, ratio);
+                    }
+                    sigPad.current.clear(); // Limpia para reajustar el estado interno
+                }
+            }
+        }
+    };
+
+    useEffect(() => {
+        // Ejecuta después de que el elemento esté montado y renderizado
+        const timer = setTimeout(resizeCanvas, 100);
+        window.addEventListener('resize', resizeCanvas);
+        return () => {
+            clearTimeout(timer);
+            window.removeEventListener('resize', resizeCanvas);
+        };
+    }, []);
 
     const clear = () => {
         sigPad.current.clear();

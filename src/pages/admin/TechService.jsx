@@ -143,6 +143,7 @@ const AdminTechService = () => {
     const [viewMode, setViewMode] = useState('list');
     const [selectedTicket, setSelectedTicket] = useState(null);
     const [_isAdmin, setIsAdmin] = useState(false);
+    const [userRole, setUserRole] = useState('');
     const [searchTerm, setSearchTerm] = useState('');
     const [technicians, setTechnicians] = useState([]);
     const [_customers, _setCustomers] = useState([]);
@@ -205,6 +206,7 @@ const AdminTechService = () => {
     const [sendingEmail, setSendingEmail] = useState(false);
     const [_uploading, _setUploading] = useState(false);
     const fileInputRef = useRef(null);
+    const cameraInputRef = useRef(null);
     
     const [warrantyPreview, setWarrantyPreview] = useState(null);
     const [warrantySettings, setWarrantySettings] = useState({ laborDays: 30, partsDays: 90 });
@@ -231,8 +233,10 @@ const AdminTechService = () => {
             try {
                 const payload = JSON.parse(atob(token.split('.')[1]));
                 setIsAdmin(payload.role === 'admin');
+                setUserRole(payload.role || '');
             } catch (error) {
                 setIsAdmin(false);
+                setUserRole('');
             }
         }
     }, []);
@@ -431,6 +435,72 @@ const AdminTechService = () => {
         }));
     };
 
+    const uploadIntakePhotos = async (files) => {
+        if (!selectedTicket || files.length === 0) return;
+        
+        const token = localStorage.getItem('adminToken');
+        const formDataPhotos = new FormData();
+        files.forEach(f => formDataPhotos.append('photos', f));
+        
+        try {
+            setIsSavingQuote(true);
+            const uploadResponse = await fetch(`/api/upload-evidence/${selectedTicket.id}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formDataPhotos
+            });
+            
+            if (uploadResponse.ok) {
+                showAlert({ title: 'Éxito', message: 'Fotos de ingreso guardadas', type: 'success' });
+                // Reload ticket details
+                const fullTicket = await ticketService.getTicket(selectedTicket.id);
+                if (fullTicket) {
+                    setSelectedTicket(fullTicket);
+                }
+            } else {
+                const errRes = await uploadResponse.json();
+                showAlert({ title: 'Error', message: errRes.error || 'No se pudieron subir las fotos', type: 'error' });
+            }
+        } catch (err) {
+            showAlert({ title: 'Error', message: err.message, type: 'error' });
+        } finally {
+            setIsSavingQuote(false);
+        }
+    };
+
+    const uploadDeliveryPhotos = async (files) => {
+        if (!selectedTicket || files.length === 0) return;
+        
+        const token = localStorage.getItem('adminToken');
+        const formDataPhotos = new FormData();
+        files.forEach(f => formDataPhotos.append('photos', f));
+        
+        try {
+            setIsSavingQuote(true);
+            const uploadResponse = await fetch(`/api/upload-delivery-photos/${selectedTicket.id}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formDataPhotos
+            });
+            
+            if (uploadResponse.ok) {
+                showAlert({ title: 'Éxito', message: 'Fotos de entrega guardadas', type: 'success' });
+                // Reload ticket details
+                const fullTicket = await ticketService.getTicket(selectedTicket.id);
+                if (fullTicket) {
+                    setSelectedTicket(fullTicket);
+                }
+            } else {
+                const errRes = await uploadResponse.json();
+                showAlert({ title: 'Error', message: errRes.error || 'No se pudieron subir las fotos', type: 'error' });
+            }
+        } catch (err) {
+            showAlert({ title: 'Error', message: err.message, type: 'error' });
+        } finally {
+            setIsSavingQuote(false);
+        }
+    };
+
     const parseTicketData = (ticket) => {
         let parsedFindings = [];
         let parsedRecommendations = [];
@@ -528,10 +598,13 @@ const AdminTechService = () => {
                     const ticketData = await evidenceResponse.json();
                     if (ticketData.damagePhotos) {
                         const photosValue = ticketData.damagePhotos;
-                        const savedPhotos = typeof photosValue === 'string' && photosValue.startsWith('[') 
-                            ? JSON.parse(photosValue) 
-                            : [];
-                        finalDamagePhotos = [...finalDamagePhotos, ...savedPhotos];
+                        const savedPhotos = Array.isArray(photosValue) 
+                            ? photosValue 
+                            : (typeof photosValue === 'string' && photosValue.startsWith('[') 
+                                ? JSON.parse(photosValue) 
+                                : []);
+                        // Evita duplicar fotos existentes usando directamente la lista actualizada del servidor
+                        finalDamagePhotos = savedPhotos;
                     }
                 }
             }
@@ -658,6 +731,24 @@ const AdminTechService = () => {
     };
 
     const updateTicketStatus = async (newStatus, warrantyData = null) => {
+        if (newStatus === 'READY' || newStatus === 'DELIVERED') {
+            const hasIntakePhotos = selectedTicket && selectedTicket.photosIntake && selectedTicket.photosIntake.length > 0;
+            const hasDamagePhotos = diagnosisData.damagePhotos && diagnosisData.damagePhotos.length > 0;
+            
+            // Si el ticket en base de datos ya tiene fotos guardadas (aunque en UI el estado local sea temporal)
+            const hasSavedPhotos = selectedTicket && (
+                (selectedTicket.damagePhotos && selectedTicket.damagePhotos.length > 0) ||
+                (selectedTicket.photosIntake && selectedTicket.photosIntake.length > 0)
+            );
+            
+            if (!hasIntakePhotos && !hasDamagePhotos && !hasSavedPhotos) {
+                const label = newStatus === 'READY' ? 'Listo para entrega' : 'Entregado';
+                const confirmStep = window.confirm(
+                    `Atención: Este equipo no cuenta con fotos registradas (de ingreso o diagnóstico). ¿Estás seguro de que deseas marcarlo como ${label} sin fotos?`
+                );
+                if (!confirmStep) return;
+            }
+        }
         try {
             const updateData = { status: newStatus };
             if (newStatus === 'DELIVERED' && warrantyData) {
@@ -965,21 +1056,21 @@ const AdminTechService = () => {
                 {/* Modals */}
                 <PortalWrapper isOpen={showForm}>
                     {showForm && (
-                        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 md:p-8 bg-slate-900/60 backdrop-blur-xl">
+                        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2 sm:p-4 md:p-8 bg-slate-900/60 backdrop-blur-xl">
                             <motion.div 
                                 initial={{ opacity: 0, scale: 0.9, y: 30 }}
                                 animate={{ opacity: 1, scale: 1, y: 0 }}
                                 exit={{ opacity: 0, scale: 0.9, y: 30 }}
-                                className="bg-white/90 backdrop-blur-2xl rounded-[3.5rem] w-full max-w-6xl shadow-[0_32px_128px_rgba(0,0,0,0.3)] overflow-hidden max-h-[95vh] flex flex-col relative border border-white"
+                                className="bg-white/90 backdrop-blur-2xl rounded-2xl md:rounded-[3.5rem] w-full max-w-6xl shadow-[0_32px_128px_rgba(0,0,0,0.3)] overflow-hidden max-h-[95vh] flex flex-col relative border border-white"
                             >
-                                <div className="p-8 border-b border-slate-100 flex justify-between items-center bg-white/50">
-                                    <div className="flex items-center gap-5">
-                                        <div className="w-14 h-14 rounded-[1.5rem] bg-indigo-600 flex items-center justify-center text-white shadow-[0_12px_24px_rgba(79,70,229,0.4)]">
-                                            <PenTool className="w-7 h-7" />
+                                <div className="p-4 md:p-8 border-b border-slate-100 flex justify-between items-center bg-white/50">
+                                    <div className="flex items-center gap-3 md:gap-5">
+                                        <div className="w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-[1.5rem] bg-indigo-600 flex items-center justify-center text-white shadow-[0_12px_24px_rgba(79,70,229,0.4)]">
+                                            <PenTool className="w-5 h-5 md:w-7 md:h-7" />
                                         </div>
                                         <div>
-                                            <h3 className="font-black text-2xl text-slate-900 tracking-tighter">Command: Intake</h3>
-                                            <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em] mt-1">Industrial Device Reception Terminal</p>
+                                            <h3 className="font-black text-lg md:text-2xl text-slate-900 tracking-tighter">Command: Intake</h3>
+                                            <p className="text-[8px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.25em] mt-1">Industrial Device Reception Terminal</p>
                                         </div>
                                     </div>
                                     <button onClick={() => { 
@@ -988,12 +1079,12 @@ const AdminTechService = () => {
                                             setSavedCreateStep(createStep);
                                         }
                                         setShowForm(false); 
-                                    }} className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center text-slate-400 hover:bg-red-500 hover:text-white transition-all shadow-sm border border-slate-100">
-                                        <X className="w-6 h-6" />
+                                    }} className="w-10 h-10 md:w-14 md:h-14 rounded-xl md:rounded-2xl bg-white flex items-center justify-center text-slate-400 hover:bg-red-500 hover:text-white transition-all shadow-sm border border-slate-100">
+                                        <X className="w-5 h-5 md:w-6 md:h-6" />
                                     </button>
                                 </div>
 
-                                <div className="overflow-y-auto p-10 custom-scrollbar bg-slate-50/30">
+                                <div className="overflow-y-auto p-4 md:p-10 custom-scrollbar bg-slate-50/30">
                                     <form onSubmit={_handleCreate}>
                                     {/* Step Indicator */}
                                     <div className="flex items-center justify-center mb-12">
@@ -1028,7 +1119,7 @@ const AdminTechService = () => {
                                     {/* Step Content */}
                                     <div className="max-w-4xl mx-auto">
                                         {createStep === 1 && (
-                                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100">
+                                            <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl border border-slate-100">
                                                 <h4 className="text-[12px] font-black text-indigo-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                     <Users className="w-5 h-5" /> Paso 1: Datos del Cliente
                                                 </h4>
@@ -1079,7 +1170,7 @@ const AdminTechService = () => {
                                         )}
 
                                         {createStep === 2 && (
-                                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100">
+                                            <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl border border-slate-100">
                                                 <h4 className="text-[12px] font-black text-amber-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                     <HardDrive className="w-5 h-5" /> Paso 2: Datos del Dispositivo
                                                 </h4>
@@ -1128,7 +1219,7 @@ const AdminTechService = () => {
                                         )}
 
                                         {createStep === 3 && (
-                                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100">
+                                            <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl border border-slate-100">
                                                 <h4 className="text-[12px] font-black text-rose-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                     <AlertCircle className="w-5 h-5" /> Paso 3: Reporte de Falla
                                                 </h4>
@@ -1159,15 +1250,19 @@ const AdminTechService = () => {
                                         )}
 
                                         {createStep === 4 && (
-                                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100">
+                                            <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl border border-slate-100">
                                                 <h4 className="text-[12px] font-black text-emerald-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                     <Camera className="w-5 h-5" /> Paso 4: Fotos de Evidencia
                                                 </h4>
                                                 <p className="text-sm text-slate-500 mb-6">Sube fotos del estado actual del equipo (opcional pero recomendado)</p>
-                                                <div className="grid grid-cols-4 gap-4 mb-6">
-                                                    <button type="button" onClick={() => fileInputRef.current.click()} className="aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all">
+                                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                                                    <button type="button" onClick={() => cameraInputRef.current.click()} className="aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all">
                                                         <Camera className="w-8 h-8" />
-                                                        <span className="text-[10px] font-bold mt-2">Agregar</span>
+                                                        <span className="text-[10px] font-bold mt-2">Tomar Foto</span>
+                                                    </button>
+                                                    <button type="button" onClick={() => fileInputRef.current.click()} className="aspect-square bg-slate-50 border-2 border-dashed border-slate-200 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:border-emerald-500 hover:text-emerald-500 transition-all">
+                                                        <Image className="w-8 h-8" />
+                                                        <span className="text-[10px] font-bold mt-2">Desde Álbum</span>
                                                     </button>
                                                     {formData.photosIntake.map((url, i) => (
                                                         <div key={i} className="aspect-square rounded-xl overflow-hidden relative">
@@ -1175,6 +1270,7 @@ const AdminTechService = () => {
                                                             <button onClick={() => setFormData(prev => ({...prev, photosIntake: prev.photosIntake.filter((_,idx) => idx !== i)}))} className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">×</button>
                                                         </div>
                                                     ))}
+                                                    <input type="file" ref={cameraInputRef} onChange={handleFileSelect} className="hidden" accept="image/*" capture="environment" />
                                                     <input type="file" ref={fileInputRef} onChange={handleFileSelect} className="hidden" multiple accept="image/*" />
                                                 </div>
                                                 <div className="flex justify-between mt-6">
@@ -1185,12 +1281,12 @@ const AdminTechService = () => {
                                         )}
 
                                         {createStep === 5 && (
-                                            <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-slate-100">
+                                            <div className="bg-white p-4 md:p-8 rounded-2xl md:rounded-[2rem] shadow-xl border border-slate-100">
                                                 <h4 className="text-[12px] font-black text-slate-600 uppercase tracking-[0.3em] mb-6 flex items-center gap-3">
                                                     <CheckCircle className="w-5 h-5" /> Paso 5: Confirmar Información
                                                 </h4>
                                                 <div className="bg-slate-50 p-6 rounded-xl space-y-4 text-sm">
-                                                    <div className="grid grid-cols-2 gap-4">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                         <div><span className="text-slate-400 font-bold">Cliente:</span> <span className="font-bold">{formData.clientName}</span></div>
                                                         <div><span className="text-slate-400 font-bold">Teléfono:</span> <span className="font-bold">{formData.clientPhone}</span></div>
                                                         <div><span className="text-slate-400 font-bold">Dispositivo:</span> <span className="font-bold">{formData.deviceType} {formData.brand}</span></div>
@@ -1446,6 +1542,74 @@ const AdminTechService = () => {
                                                 )}
                                             </div>
 
+                                            {/* Fotos de Recepción / Ingreso */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mt-6">
+                                                 <div className="flex justify-between items-center mb-4">
+                                                     <h4 className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2">
+                                                         <Camera className="w-4 h-4 text-slate-400" /> Fotos de Recepción / Ingreso
+                                                     </h4>
+                                                     {!isReadOnly && (
+                                                         <div className="flex gap-2">
+                                                             <input 
+                                                                 type="file" 
+                                                                 accept="image/*" 
+                                                                 onChange={async (e) => uploadIntakePhotos(Array.from(e.target.files))}
+                                                                 className="hidden"
+                                                                 id="intake-photos-camera"
+                                                                 capture="environment"
+                                                             />
+                                                             <label htmlFor="intake-photos-camera" className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-700 transition-colors">
+                                                                 + Tomar Foto
+                                                             </label>
+
+                                                             <input 
+                                                                 type="file" 
+                                                                 accept="image/*" 
+                                                                 multiple
+                                                                 onChange={async (e) => uploadIntakePhotos(Array.from(e.target.files))}
+                                                                 className="hidden"
+                                                                 id="intake-photos-upload"
+                                                             />
+                                                             <label htmlFor="intake-photos-upload" className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-800 transition-colors">
+                                                                 + Desde Álbum
+                                                             </label>
+                                                         </div>
+                                                     )}
+                                                 </div>
+                                                {selectedTicket.photosIntake && selectedTicket.photosIntake.length > 0 ? (
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                        {selectedTicket.photosIntake.map((url, i) => (
+                                                            <div key={i} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-100 hover:scale-[1.02] transition-transform duration-200">
+                                                                <img src={url} alt={`Ingreso ${i+1}`} className="w-full h-full object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+                                                                {!isReadOnly && (
+                                                                    <button 
+                                                                        onClick={async () => {
+                                                                            try {
+                                                                                setIsSavingQuote(true);
+                                                                                const updatedPhotos = selectedTicket.photosIntake.filter((_, idx) => idx !== i);
+                                                                                await ticketService.updateTicket(selectedTicket.id, { photosIntake: updatedPhotos });
+                                                                                setSelectedTicket(prev => ({ ...prev, photosIntake: updatedPhotos }));
+                                                                                showAlert({ title: 'Eliminada', message: 'Foto eliminada correctamente', type: 'success' });
+                                                                            } catch (err) {
+                                                                                showAlert({ title: 'Error', message: err.message, type: 'error' });
+                                                                            } finally {
+                                                                                setIsSavingQuote(false);
+                                                                            }
+                                                                        }}
+                                                                        className="absolute top-2 right-2 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs font-bold flex items-center justify-center shadow-md transition-colors"
+                                                                    >×</button>
+                                                                )}
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-center py-6 bg-slate-50 rounded-xl border border-dashed border-slate-200">
+                                                        <Camera className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                                        <p className="text-xs text-slate-400 font-medium">No se registraron fotos al ingresar el equipo.</p>
+                                                    </div>
+                                                )}
+                                            </div>
+
                                             {/* Firmas de Ingreso */}
                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -1612,6 +1776,22 @@ const AdminTechService = () => {
                                                                 <input 
                                                                     type="file" 
                                                                     accept="image/*" 
+                                                                    onChange={(e) => {
+                                                                        const files = Array.from(e.target.files);
+                                                                        const newPhotos = files.map(f => URL.createObjectURL(f));
+                                                                        setDiagnosisData(prev => ({...prev, damagePhotos: [...prev.damagePhotos, ...newPhotos]}));
+                                                                    }}
+                                                                    className="hidden"
+                                                                    id="damage-photos-camera"
+                                                                    capture="environment"
+                                                                />
+                                                                <label htmlFor="damage-photos-camera" className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-700">
+                                                                    + Tomar Foto
+                                                                </label>
+
+                                                                <input 
+                                                                    type="file" 
+                                                                    accept="image/*" 
                                                                     multiple
                                                                     onChange={(e) => {
                                                                         const files = Array.from(e.target.files);
@@ -1619,15 +1799,15 @@ const AdminTechService = () => {
                                                                         setDiagnosisData(prev => ({...prev, damagePhotos: [...prev.damagePhotos, ...newPhotos]}));
                                                                     }}
                                                                     className="hidden"
-                                                                    id="damage-photos"
+                                                                    id="damage-photos-upload"
                                                                 />
-                                                                <label htmlFor="damage-photos" className="px-4 py-2 bg-red-500 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-red-600">
-                                                                    + Agregar Fotos
+                                                                <label htmlFor="damage-photos-upload" className="px-4 py-2 bg-red-500 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-red-600">
+                                                                    + Desde Álbum
                                                                 </label>
                                                             </>
                                                         )}
                                                     </div>
-                                                    <div className="grid grid-cols-3 gap-2">
+                                                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                                                         {diagnosisData.damagePhotos.map((url, i) => (
                                                             <div key={i} className="relative aspect-square bg-slate-100 rounded-lg overflow-hidden">
                                                                 <img src={url} alt="Daño" className="w-full h-full object-cover" />
@@ -2068,6 +2248,65 @@ const AdminTechService = () => {
                                                 </div>
                                             </div>
 
+                                            {/* Fotos Finales de Entrega */}
+                                            <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 mt-6">
+                                                 <div className="flex justify-between items-center mb-4">
+                                                     <h4 className="text-xs font-bold text-slate-400 uppercase flex items-center gap-2">
+                                                          <Camera className="w-4 h-4 text-slate-400" /> Fotos finales de entrega (Equipo Reparado)
+                                                     </h4>
+                                                     {!isReadOnly && (
+                                                          <div className="flex gap-2">
+                                                              <input 
+                                                                  type="file" 
+                                                                  accept="image/*" 
+                                                                  onChange={async (e) => uploadDeliveryPhotos(Array.from(e.target.files))}
+                                                                  className="hidden"
+                                                                  id="delivery-photos-camera"
+                                                                  capture="environment"
+                                                              />
+                                                              <label htmlFor="delivery-photos-camera" className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-indigo-700 transition-colors">
+                                                                  + Tomar Foto
+                                                              </label>
+
+                                                              <input 
+                                                                  type="file" 
+                                                                  accept="image/*" 
+                                                                  multiple
+                                                                  onChange={async (e) => uploadDeliveryPhotos(Array.from(e.target.files))}
+                                                                  className="hidden"
+                                                                  id="delivery-photos-upload"
+                                                              />
+                                                              <label htmlFor="delivery-photos-upload" className="px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-bold cursor-pointer hover:bg-slate-800 transition-colors">
+                                                                  + Desde Álbum
+                                                              </label>
+                                                          </div>
+                                                     )}
+                                                 </div>
+                                                 {selectedTicket.photosDelivery && selectedTicket.photosDelivery.length > 0 ? (
+                                                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                                         {selectedTicket.photosDelivery.map((url, i) => (
+                                                             <div key={i} className="relative aspect-square bg-slate-100 rounded-xl overflow-hidden border border-slate-100 hover:scale-[1.02] transition-transform duration-200">
+                                                                 <img src={url} alt={`Entrega ${i+1}`} className="w-full h-full object-cover cursor-pointer" onClick={() => window.open(url, '_blank')} />
+                                                                 {!isReadOnly && (
+                                                                     <button 
+                                                                         onClick={async () => {
+                                                                             const updatedPhotos = selectedTicket.photosDelivery.filter((_, idx) => idx !== i);
+                                                                             await ticketService.updateTicket(selectedTicket.id, { photosDelivery: JSON.stringify(updatedPhotos) });
+                                                                             setSelectedTicket(prev => ({ ...prev, photosDelivery: updatedPhotos }));
+                                                                         }}
+                                                                         className="absolute top-2 right-2 p-1.5 bg-red-600/80 hover:bg-red-600 text-white rounded-lg transition-colors"
+                                                                     >
+                                                                         <Trash2 className="w-3.5 h-3.5" />
+                                                                     </button>
+                                                                 )}
+                                                             </div>
+                                                         ))}
+                                                     </div>
+                                                 ) : (
+                                                     <p className="text-center text-xs text-slate-400 py-4">No hay fotos finales registradas</p>
+                                                 )}
+                                            </div>
+
                                             {/* Garantías */}
                                             {warrantyPreview && (
                                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -2163,12 +2402,10 @@ const AdminTechService = () => {
                                                             <p className="text-[10px] text-center text-slate-400 mt-2">Equipo entregado por técnico</p>
                                                         </div>
                                                     ) : (
-                                                        !isReadOnly && (
-                                                            <SignaturePad 
-                                                                title="Firma del Técnico"
-                                                                onSave={(data) => handleSaveSignature('deliveryTech', data)}
-                                                            />
-                                                        )
+                                                        <SignaturePad 
+                                                            title="Firma del Técnico"
+                                                            onSave={(data) => handleSaveSignature('deliveryTech', data)}
+                                                        />
                                                     )}
                                                 </div>
                                                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
@@ -2179,12 +2416,10 @@ const AdminTechService = () => {
                                                             <p className="text-[10px] text-center text-slate-400 mt-2">Equipo recibido por cliente</p>
                                                         </div>
                                                     ) : (
-                                                        !isReadOnly && (
-                                                            <SignaturePad 
-                                                                title="Firma del Cliente"
-                                                                onSave={(data) => handleSaveSignature('deliveryClient', data)}
-                                                            />
-                                                        )
+                                                        <SignaturePad 
+                                                            title="Firma del Cliente"
+                                                            onSave={(data) => handleSaveSignature('deliveryClient', data)}
+                                                        />
                                                     )}
                                                 </div>
                                             </div>
@@ -2219,6 +2454,14 @@ const AdminTechService = () => {
 
                                             <div className="flex justify-between gap-3">
                                                 <button onClick={() => setManageStep(5)} className="px-6 py-3 bg-slate-100 text-slate-600 rounded-xl font-bold text-sm">← Anterior</button>
+                                                {isReadOnly && ['admin', 'gerente', 'técnico', 'technician'].includes(userRole) && (
+                                                    <button 
+                                                        onClick={() => updateTicketStatus('REPAIRING')} 
+                                                        className="px-8 py-3 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-amber-200 transition-all active:scale-95"
+                                                    >
+                                                        REABRIR TICKET ↺
+                                                    </button>
+                                                )}
                                                 {!isReadOnly && (
                                                     <div className="flex gap-3">
                                                         {selectedTicket.status !== 'DELIVERED' && (
@@ -2248,5 +2491,6 @@ const AdminTechService = () => {
         </AdminLayout>
     );
 };
+
 
 export default AdminTechService;

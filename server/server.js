@@ -83,12 +83,21 @@ app.use('/api/', limiter);
 const authLimiter = rateLimit({ windowMs: 60 * 60 * 1000, max: 100 });
 
 const allowedOrigins = process.env.NODE_ENV === 'production'
-    ? [process.env.FRONTEND_URL].filter(Boolean)
+    ? (process.env.FRONTEND_URL || '').split(',').map(o => o.trim().replace(/\r/g, '')).filter(Boolean)
     : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:3000'];
 
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+        console.log('[CORS Debug] Request Origin:', origin, 'Allowed Origins:', allowedOrigins);
+        if (!origin) return callback(null, true);
+        const trimmedOrigin = origin.trim().replace(/\r/g, '');
+        if (
+            allowedOrigins.includes(trimmedOrigin) || 
+            trimmedOrigin.endsWith('labodegadelcomputador.com') || 
+            trimmedOrigin.includes('72.60.27.214')
+        ) {
+            return callback(null, true);
+        }
         return callback(new Error(`CORS bloqueado para origen: ${origin}`));
     },
     credentials: true,
@@ -165,12 +174,57 @@ app.post('/api/upload', authenticateToken, uploadDisk.single('image'), (req, res
 
 app.get('/api/tickets', authenticateToken, (req, res) => {
     try {
-        const query = `SELECT t.*, u.name as assignedToName FROM tickets t LEFT JOIN users u ON t.assignedTo = u.id ORDER BY t.id DESC`;
-        db.all(query, [], (err, rows) => {
+        const { summary, limit, offset } = req.query;
+        
+        // Exclude heavy Base64 image and signature columns by default to prevent event-loop blocking
+        let selectFields = `
+            t.id, t.clientName, t.clientPhone, t.clientEmail, t.clientAddress, t.clientIdNumber,
+            t.orderNumber, t.intakeDate, t.deviceType, t.brand, t.model, t.serial,
+            t.issueDescription, t.deviceConditions, t.status, t.diagnosis, t.estimatedCost,
+            t.technicianNotes, t.quoteItems, t.approvedByClient, t.findings, t.recommendations,
+            t.assignedTo, t.customerId, t.createdAt, t.updatedAt, t.timeline,
+            t.laborCost, t.laborDescription, t.laborItems, t.repairNotes,
+            t.estimatedDeliveryDate, t.deliveredDate, t.history,
+            u.name as assignedToName
+        `;
+        
+        if (summary === 'true') {
+            // Minimal set of fields for very fast dashboard stats
+            selectFields = `
+                t.id, t.clientName, t.clientPhone, t.clientEmail, t.orderNumber, 
+                t.intakeDate, t.deviceType, t.brand, t.model, t.status, 
+                t.assignedTo, t.createdAt, t.updatedAt, t.estimatedCost, t.laborCost,
+                u.name as assignedToName
+            `;
+        } else if (summary === 'false') {
+            // Full query including heavy columns (only if explicitly requested)
+            selectFields = 't.*, u.name as assignedToName';
+        }
+        
+        let sql = `SELECT ${selectFields} FROM tickets t LEFT JOIN users u ON t.assignedTo = u.id`;
+        const params = [];
+        
+        sql += ` ORDER BY t.id DESC`;
+
+        if (limit) {
+            sql += ` LIMIT ?`;
+            params.push(parseInt(limit));
+            if (offset) {
+                sql += ` OFFSET ?`;
+                params.push(parseInt(offset));
+            }
+        }
+
+        db.all(sql, params, (err, rows) => {
             if (err) {
                 console.error('[GET TICKETS] SQL Error:', err.message);
                 return res.status(500).json({ error: err.message });
             }
+            
+            if (summary === 'true') {
+                return res.json(rows);
+            }
+
             res.json(rows.map(t => ({
                 ...t,
                 photosIntake: safeParse(t.photosIntake),
@@ -178,7 +232,9 @@ app.get('/api/tickets', authenticateToken, (req, res) => {
                 findings: safeParse(t.findings),
                 recommendations: safeParse(t.recommendations),
                 damagePhotos: safeParse(t.damagePhotos),
+                photosDelivery: safeParse(t.photosDelivery),
                 laborItems: safeParse(t.laborItems),
+                history: safeParse(t.history) || [],
                 approvedByClient: t.approvedByClient === 1
             })));
         });
@@ -200,6 +256,7 @@ app.get('/api/tickets/:ticketId', authenticateToken, (req, res) => {
             findings: safeParse(row.findings),
             recommendations: safeParse(row.recommendations),
             damagePhotos: safeParse(row.damagePhotos),
+            photosDelivery: safeParse(row.photosDelivery),
             laborItems: safeParse(row.laborItems),
             approvedByClient: row.approvedByClient === 1
         });
@@ -214,15 +271,116 @@ app.post('/api/tickets', authenticateToken, (req, res) => {
         
         const ticketId = this.lastID;
         
-        // Auto-create user and send email
-        userRoutes.autoCreateUserForTicket({
-            clientName,
-            clientEmail,
-            ticketId,
-            deviceType,
-            brand,
-            model
-        });
+        // Auto-create user and send email (if email is provided)
+        if (clientEmail && clientEmail.trim()) {
+            userRoutes.autoCreateUserForTicket({
+                clientName,
+                clientEmail,
+                ticketId,
+                deviceType,
+                brand,
+                model
+            });
+        }
+
+        // --- CRM SYNC: Auto-create or Update Customer in background ---
+        const syncCustomer = () => {
+            const cleanEmail = clientEmail ? clientEmail.trim().toLowerCase() : null;
+            const cleanPhone = clientPhone ? clientPhone.toString().trim() : null;
+            const cleanIdNumber = clientIdNumber ? clientIdNumber.toString().trim() : null;
+            const cleanName = clientName ? clientName.trim() : '';
+
+            if (!cleanName && !cleanPhone && !cleanIdNumber) return;
+
+            // Search for existing customer by idNumber, phone, or email
+            let searchSql = 'SELECT id, name, email, phone, address, idNumber FROM customers WHERE 1=0';
+            const searchParams = [];
+            if (cleanIdNumber) {
+                searchSql += ' OR idNumber = ?';
+                searchParams.push(cleanIdNumber);
+            }
+            if (cleanPhone) {
+                searchSql += ' OR phone = ?';
+                searchParams.push(cleanPhone);
+            }
+            if (cleanEmail) {
+                searchSql += ' OR email = ?';
+                searchParams.push(cleanEmail);
+            }
+
+            db.get(searchSql, searchParams, (err, customer) => {
+                if (err) {
+                    console.error('[CRM Sync Error] Search failed:', err.message);
+                    return;
+                }
+
+                const nowStr = new Date().toISOString();
+
+                if (customer) {
+                    // Update existing customer details if they are currently null or blank
+                    const customerId = customer.id;
+                    const updates = [];
+                    const updateParams = [];
+
+                    if (cleanName && (!customer.name || customer.name !== cleanName)) {
+                        updates.push('name = ?');
+                        updateParams.push(cleanName);
+                    }
+                    if (cleanEmail && (!customer.email || customer.email !== cleanEmail)) {
+                        updates.push('email = ?');
+                        updateParams.push(cleanEmail);
+                    }
+                    if (cleanPhone && (!customer.phone || customer.phone !== cleanPhone)) {
+                        updates.push('phone = ?');
+                        updateParams.push(cleanPhone);
+                    }
+                    if (clientAddress && (!customer.address || customer.address !== clientAddress.trim())) {
+                        updates.push('address = ?');
+                        updateParams.push(clientAddress.trim());
+                    }
+                    if (cleanIdNumber && (!customer.idNumber || customer.idNumber !== cleanIdNumber)) {
+                        updates.push('idNumber = ?');
+                        updateParams.push(cleanIdNumber);
+                    }
+
+                    if (updates.length > 0) {
+                        updates.push('updatedAt = ?');
+                        updateParams.push(nowStr);
+                        updateParams.push(customerId);
+
+                        db.run(`UPDATE customers SET ${updates.join(', ')} WHERE id = ?`, updateParams, (upErr) => {
+                            if (upErr) {
+                                console.error('[CRM Sync Error] Update failed:', upErr.message);
+                            } else {
+                                console.log(`[CRM Sync] Customer ID ${customerId} updated.`);
+                                db.run('UPDATE tickets SET customerId = ? WHERE id = ?', [customerId, ticketId]);
+                            }
+                        });
+                    } else {
+                        // Link customer ID to ticket directly
+                        console.log(`[CRM Sync] Customer ID ${customerId} linked (no updates needed).`);
+                        db.run('UPDATE tickets SET customerId = ? WHERE id = ?', [customerId, ticketId]);
+                    }
+                } else {
+                    // Create new customer in CRM
+                    const insertSql = `
+                        INSERT INTO customers (name, email, phone, address, idNumber, clientType, customerType, status, createdAt, updatedAt)
+                        VALUES (?, ?, ?, ?, ?, 'Persona', 'Nuevo', 'active', ?, ?)
+                    `;
+                    db.run(insertSql, [cleanName, cleanEmail, cleanPhone, clientAddress ? clientAddress.trim() : null, cleanIdNumber, nowStr, nowStr], function (insErr) {
+                        if (insErr) {
+                            console.error('[CRM Sync Error] Insert failed:', insErr.message);
+                        } else {
+                            const newCustomerId = this.lastID;
+                            console.log(`[CRM Sync] New Customer ID ${newCustomerId} created and linked.`);
+                            db.run('UPDATE tickets SET customerId = ? WHERE id = ?', [newCustomerId, ticketId]);
+                        }
+                    });
+                }
+            });
+        };
+
+        syncCustomer();
 
         res.json({ id: ticketId, status: 'RECEIVED' });
     });
@@ -233,7 +391,8 @@ app.put('/api/tickets/:id', authenticateToken, (req, res) => {
         status, diagnosis, estimatedCost, deviceType, brand, model, 
         findings, recommendations, laborItems, laborCost, quoteItems, 
         technicianNotes, repairNotes, assignedTo, estimatedDeliveryDate, deliveredDate,
-        signatureIntakeTech, signatureIntakeClient, signatureDeliveryTech, signatureDeliveryClient
+        signatureIntakeTech, signatureIntakeClient, signatureDeliveryTech, signatureDeliveryClient,
+        damagePhotos, photosIntake, photosDelivery
     } = req.body;
     const ticketId = req.params.id;
     const now = new Date().toISOString();
@@ -260,214 +419,240 @@ app.put('/api/tickets/:id', authenticateToken, (req, res) => {
         'DELIVERED': []
     };
 
-    // Obtener datos actuales para realizar una actualización parcial segura
-    db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, currentTicket) => {
-        if (err) {
-            console.error('[TICKET PUT] Error fetching current ticket:', err.message);
-            return res.status(500).json({ error: err.message });
-        }
-
-        if (!currentTicket) {
-            return res.status(404).json({ error: 'Ticket no encontrado' });
-        }
-
-        const currentStatus = currentTicket.status;
-        const newStatus = status || currentStatus;
-
-        // Validar transición si el estado cambió
-        if (status && status !== currentStatus) {
-            const allowed = validTransitions[currentStatus] || [];
-            if (!allowed.includes(status)) {
-                return res.status(400).json({ 
-                    error: `Transición inválida de ${currentStatus} a ${status}.`
-                });
-            }
+    // Fetch active user's role to prevent stale roles and handle permissions securely
+    db.get('SELECT role FROM users WHERE id = ?', [req.user.id], (userErr, userRow) => {
+        if (userErr) {
+            console.error('[TICKET PUT] Error fetching user role:', userErr.message);
+            return res.status(500).json({ error: userErr.message });
         }
         
-        // Mezclar datos (usar valor actual si el nuevo es undefined)
-        const updateData = {
-            status: newStatus,
-            diagnosis: diagnosis !== undefined ? diagnosis : currentTicket.diagnosis,
-            estimatedCost: estimatedCost !== undefined ? estimatedCost : currentTicket.estimatedCost,
-            deviceType: deviceType !== undefined ? deviceType : currentTicket.deviceType,
-            brand: brand !== undefined ? brand : currentTicket.brand,
-            model: model !== undefined ? model : currentTicket.model,
-            findings: findings !== undefined ? safeStringify(findings) : currentTicket.findings,
-            recommendations: recommendations !== undefined ? safeStringify(recommendations) : currentTicket.recommendations,
-            laborItems: laborItems !== undefined ? safeStringify(laborItems) : currentTicket.laborItems,
-            laborCost: laborCost !== undefined ? laborCost : currentTicket.laborCost,
-            quoteItems: quoteItems !== undefined ? safeStringify(quoteItems) : currentTicket.quoteItems,
-            technicianNotes: technicianNotes !== undefined ? technicianNotes : currentTicket.technicianNotes,
-            repairNotes: repairNotes !== undefined ? repairNotes : currentTicket.repairNotes,
-            assignedTo: assignedTo !== undefined ? assignedTo : currentTicket.assignedTo,
-            estimatedDeliveryDate: estimatedDeliveryDate !== undefined ? estimatedDeliveryDate : currentTicket.estimatedDeliveryDate,
-            deliveredDate: (status === 'DELIVERED' || status === 'Entregado') && !currentTicket.deliveredDate ? new Date().toISOString() : (deliveredDate !== undefined ? deliveredDate : currentTicket.deliveredDate),
-            signatureIntakeTech: signatureIntakeTech !== undefined ? signatureIntakeTech : currentTicket.signatureIntakeTech,
-            signatureIntakeClient: signatureIntakeClient !== undefined ? signatureIntakeClient : currentTicket.signatureIntakeClient,
-            signatureDeliveryTech: signatureDeliveryTech !== undefined ? signatureDeliveryTech : currentTicket.signatureDeliveryTech,
-            signatureDeliveryClient: signatureDeliveryClient !== undefined ? signatureDeliveryClient : currentTicket.signatureDeliveryClient
-        };
-        
-        db.run(`UPDATE tickets SET 
-            status = ?, diagnosis = ?, estimatedCost = ?, deviceType = ?, brand = ?, model = ?, 
-            findings = ?, recommendations = ?, laborItems = ?, laborCost = ?, quoteItems = ?,
-            technicianNotes = ?, repairNotes = ?, assignedTo = ?, estimatedDeliveryDate = ?, deliveredDate = ?, 
-            signatureIntakeTech = ?, signatureIntakeClient = ?, signatureDeliveryTech = ?, signatureDeliveryClient = ?,
-            updatedAt = ? 
-            WHERE id = ?`, 
-            [
-                updateData.status, updateData.diagnosis, updateData.estimatedCost, 
-                updateData.deviceType, updateData.brand, updateData.model, 
-                updateData.findings, updateData.recommendations, updateData.laborItems, 
-                updateData.laborCost, updateData.quoteItems, updateData.technicianNotes, 
-                updateData.repairNotes, updateData.assignedTo, updateData.estimatedDeliveryDate, updateData.deliveredDate,
-                updateData.signatureIntakeTech, updateData.signatureIntakeClient, updateData.signatureDeliveryTech, updateData.signatureDeliveryClient,
-                now, ticketId
-            ], function(err) {
+        const userRole = userRow ? userRow.role : req.user.role;
+        const isPrivileged = ['admin', 'gerente', 'técnico', 'technician'].includes(userRole);
+
+        // Obtener datos actuales para realizar una actualización parcial segura
+        db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, currentTicket) => {
             if (err) {
-                console.error('[TICKET PUT] SQL Error:', err.message);
+                console.error('[TICKET PUT] Error fetching current ticket:', err.message);
                 return res.status(500).json({ error: err.message });
             }
 
-            console.log('[TICKET PUT] Update successful, status:', status);
-
-            // AUTO-WARRANTY ACTIVATION
-            // Solo si el estado cambia a 'DELIVERED' y NO proviene de un equipo RECHAZADO
-            if (status === 'DELIVERED' && currentTicket.status !== 'REJECTED') {
-                console.log('[WARRANTY-AUTO] Triggering automatic warranty for ticket:', ticketId);
-                warrantyAutomation.createAutomatedRepairWarranty(ticketId)
-                    .catch(err => console.error('[WARRANTY-AUTO] Failed to create automatic warranty:', err.message));
+            if (!currentTicket) {
+                return res.status(404).json({ error: 'Ticket no encontrado' });
             }
 
-            // Notificar cuando el ticket cambia a QUOTED (cotización lista para revisión)
-            if (status === 'QUOTED') {
-                db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], async (err, ticket) => {
-                    if (!err && ticket && ticket.clientEmail) {
-                        const estimatedCost = ticket.estimatedCost || 0;
-                        const laborCost = ticket.laborCost || 0;
-                        const totalCost = estimatedCost + laborCost;
-                        
-                        await sendEmail({
-                            to: ticket.clientEmail,
-                            subject: `Ticket #${ticketId.toString().padStart(5, '0')} - Presupuesto Listo para Tu Revisión | LBDC`,
-                            html: `
-                            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                                <div style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 30px; text-align: center;">
-                                    <h1 style="color: white; margin: 0; font-size: 24px;">Presupuesto Listo</h1>
-                                    <p style="color: #c7d2fe; margin: 10px 0 0 0;">La Bodega del Computador</p>
-                                </div>
-                                <div style="padding: 30px; background: #f8fafc;">
-                                    <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
-                                    <p style="color: #64748b;">Hemos completado el diagnóstico de tu equipo y el presupuesto está listo para tu revisión.</p>
-                                    
-                                    <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                                        <h3 style="color: #1e293b; margin: 0 0 15px 0;">Detalles del Servicio</h3>
-                                        <p style="margin: 5px 0;"><strong>Ticket:</strong> #${ticketId.toString().padStart(5, '0')}</p>
-                                        <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.deviceType} ${ticket.brand} ${ticket.model || ''}</p>
-                                        <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
-                                        <p style="margin: 5px 0;"><strong>Diagnóstico:</strong> ${ticket.diagnosis || 'N/A'}</p>
-                                        <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;">
-                                        <p style="margin: 5px 0; font-size: 18px;"><strong>Presupuesto Total:</strong> $${totalCost.toLocaleString('es-CO')}</p>
-                                    </div>
-                                    
-                                    <div style="text-align: center; margin-top: 30px;">
-                                        <a href="#" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Ver Informe Técnico y Autorizar</a>
-                                    </div>
-                                </div>
-                                <div style="background: #1e293b; padding: 20px; text-align: center;">
-                                    <p style="color: #94a3b8; margin: 0; font-size: 12px;">© 2024 La Bodega del Computador. Todos los derechos reservados.</p>
-                                </div>
-                            </div>
-                        `,
-                            type: 'soporte'
-                        });
-                    }
-                });
-            }
+            const currentStatus = currentTicket.status;
+            const newStatus = status || currentStatus;
 
-            // Notificar cuando el ticket es autorizado para reparación
-            if (status === 'AUTHORIZED') {
-                db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, ticket) => {
-                    if (!err && ticket) {
-                        console.log('[TICKET PUT] Broadcasting AUTHORIZED notification');
-                        notificationRoutes.broadcastNotification('technician', 'ticket', 'Ticket Autorizado', `El ticket #${ticketId} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${ticketId}`);
-                        notificationRoutes.broadcastNotification('admin', 'ticket', 'Ticket Autorizado', `El ticket #${ticketId} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${ticketId}`);
-                    }
-                });
-            }
-
-            // Crear garantía automáticamente cuando el ticket se marca como "DELIVERED" o "Entregado"
-            if (status === 'DELIVERED' || status === 'Entregado') {
-                db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], async (err, ticket) => {
-                    if (!err && ticket) {
-                        const quoteItems = safeParse(ticket.quoteItems) || [];
-                        const laborItems = safeParse(ticket.laborItems) || [];
-                        const hasLabor = laborItems.length > 0;
-                        const hasParts = quoteItems.length > 0;
-
-                        let warrantyInfo = '';
-                        if (hasLabor && hasParts) {
-                            warrantyInfo = '30 días por mano de obra y 90 días por partes/accesorios';
-                        } else if (hasLabor) {
-                            warrantyInfo = '30 días por mano de obra';
-                        } else if (hasParts) {
-                            warrantyInfo = '90 días por partes/accesorios';
-                        }
-
-                        const laborDays = updateData.warrantyLaborDays || (hasLabor ? 30 : 0);
-                        const partsDays = updateData.warrantyPartsDays || (hasParts ? 90 : 0);
-
-                        warrantyAutomation.createCustomWarranty(ticketId, laborDays, partsDays)
-                            .catch(err => console.error('[WARRANTy-AUTO] Failed to create warranties:', err.message));
-
-                        if (ticket.clientEmail) {
-                            const estimatedCost = ticket.estimatedCost || 0;
-                            const laborCost = ticket.laborCost || 0;
-                            const totalCost = estimatedCost + laborCost;
-                            
-                            await sendEmail({
-                                to: ticket.clientEmail,
-                                subject: `Ticket #${ticketId.toString().padStart(5, '0')} - Servicio Completado | LBDC`,
-                                html: `
-                                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                                    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center;">
-                                        <h1 style="color: white; margin: 0; font-size: 24px;">✓ Servicio Completado</h1>
-                                        <p style="color: #a7f3d0; margin: 10px 0 0 0;">La Bodega del Computador</p>
-                                    </div>
-                                    <div style="padding: 30px; background: #f8fafc;">
-                                        <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
-                                        <p style="color: #64748b;">Tu equipo ha sido reparado y está listo para entrega.</p>
-                                        
-                                        <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
-                                            <h3 style="color: #1e293b; margin: 0 0 15px 0;">Detalles del Servicio</h3>
-                                            <p style="margin: 5px 0;"><strong>Ticket:</strong> #${ticketId.toString().padStart(5, '0')}</p>
-                                            <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.deviceType} ${ticket.brand} ${ticket.model || ''}</p>
-                                            <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
-                                            <p style="margin: 5px 0;"><strong>Diagnóstico:</strong> ${ticket.diagnosis || 'N/A'}</p>
-                                            <p style="margin: 5px 0;"><strong>Reparación:</strong> ${ticket.repairNotes || 'N/A'}</p>
-                                            <p style="margin: 5px 0; font-size: 18px;"><strong>Total Pagado:</strong> $${totalCost.toLocaleString('es-CO')}</p>
-                                        </div>
-                                        
-                                        ${warrantyInfo ? `<p style="color: #64748b; font-size: 14px;">Tu equipo cuenta con garantía: <strong>${warrantyInfo}</strong>.</p>` : ''}
-                                        
-                                        <div style="text-align: center; margin-top: 30px;">
-                                            <p style="color: #334155; font-weight: bold;">Visítanos para retirar tu equipo</p>
-                                        </div>
-                                    </div>
-                                    <div style="background: #1e293b; padding: 20px; text-align: center;">
-                                        <p style="color: #94a3b8; margin: 0; font-size: 12px;">© 2024 La Bodega del Computador. Todos los derechos reservados.</p>
-                                    </div>
-                                </div>
-                            `,
-                                type: 'soporte'
-                            });
-                        }
-                    }
-                });
+            // Validar transición si el estado cambió y el usuario NO es privilegiado
+            if (status && status !== currentStatus && !isPrivileged) {
+                const allowed = validTransitions[currentStatus] || [];
+                if (!allowed.includes(status)) {
+                    return res.status(400).json({ 
+                        error: `Transición inválida de ${currentStatus} a ${status}.`
+                    });
+                }
             }
             
-            // Trigger notification if status changed...
-            res.json({ success: true });
+            // Proceder directamente con la actualización sin bloqueo estricto de fotos para flexibilizar la entrega
+            const checkPhotoPresenceAndUpdate = () => {
+                executeUpdate();
+            };
+
+            const executeUpdate = () => {
+                // Mezclar datos (usar valor actual si el nuevo es undefined)
+                const updateData = {
+                    status: newStatus,
+                    diagnosis: diagnosis !== undefined ? diagnosis : currentTicket.diagnosis,
+                    estimatedCost: estimatedCost !== undefined ? estimatedCost : currentTicket.estimatedCost,
+                    deviceType: deviceType !== undefined ? deviceType : currentTicket.deviceType,
+                    brand: brand !== undefined ? brand : currentTicket.brand,
+                    model: model !== undefined ? model : currentTicket.model,
+                    findings: findings !== undefined ? safeStringify(findings) : currentTicket.findings,
+                    recommendations: recommendations !== undefined ? safeStringify(recommendations) : currentTicket.recommendations,
+                    laborItems: laborItems !== undefined ? safeStringify(laborItems) : currentTicket.laborItems,
+                    laborCost: laborCost !== undefined ? laborCost : currentTicket.laborCost,
+                    quoteItems: quoteItems !== undefined ? safeStringify(quoteItems) : currentTicket.quoteItems,
+                    technicianNotes: technicianNotes !== undefined ? technicianNotes : currentTicket.technicianNotes,
+                    repairNotes: repairNotes !== undefined ? repairNotes : currentTicket.repairNotes,
+                    assignedTo: assignedTo !== undefined ? assignedTo : currentTicket.assignedTo,
+                    estimatedDeliveryDate: estimatedDeliveryDate !== undefined ? estimatedDeliveryDate : currentTicket.estimatedDeliveryDate,
+                    deliveredDate: (status === 'DELIVERED' || status === 'Entregado') && !currentTicket.deliveredDate ? new Date().toISOString() : (deliveredDate !== undefined ? deliveredDate : currentTicket.deliveredDate),
+                    signatureIntakeTech: signatureIntakeTech !== undefined ? signatureIntakeTech : currentTicket.signatureIntakeTech,
+                    signatureIntakeClient: signatureIntakeClient !== undefined ? signatureIntakeClient : currentTicket.signatureIntakeClient,
+                    signatureDeliveryTech: signatureDeliveryTech !== undefined ? signatureDeliveryTech : currentTicket.signatureDeliveryTech,
+                    signatureDeliveryClient: signatureDeliveryClient !== undefined ? signatureDeliveryClient : currentTicket.signatureDeliveryClient,
+                    damagePhotos: damagePhotos !== undefined ? (typeof damagePhotos === 'string' ? damagePhotos : JSON.stringify(damagePhotos)) : currentTicket.damagePhotos,
+                    photosIntake: photosIntake !== undefined ? (typeof photosIntake === 'string' ? photosIntake : JSON.stringify(photosIntake)) : currentTicket.photosIntake,
+                    photosDelivery: photosDelivery !== undefined ? (typeof photosDelivery === 'string' ? photosDelivery : JSON.stringify(photosDelivery)) : currentTicket.photosDelivery
+                };
+
+                db.run(`UPDATE tickets SET 
+                    status = ?, diagnosis = ?, estimatedCost = ?, deviceType = ?, brand = ?, model = ?, 
+                    findings = ?, recommendations = ?, laborItems = ?, laborCost = ?, quoteItems = ?,
+                    technicianNotes = ?, repairNotes = ?, assignedTo = ?, estimatedDeliveryDate = ?, deliveredDate = ?, 
+                    signatureIntakeTech = ?, signatureIntakeClient = ?, signatureDeliveryTech = ?, signatureDeliveryClient = ?,
+                    damagePhotos = ?, photosIntake = ?, photosDelivery = ?,
+                    updatedAt = ? 
+                    WHERE id = ?`, 
+                    [
+                        updateData.status, updateData.diagnosis, updateData.estimatedCost, 
+                        updateData.deviceType, updateData.brand, updateData.model, 
+                        updateData.findings, updateData.recommendations, updateData.laborItems, 
+                        updateData.laborCost, updateData.quoteItems, updateData.technicianNotes, 
+                        updateData.repairNotes, updateData.assignedTo, updateData.estimatedDeliveryDate, updateData.deliveredDate,
+                        updateData.signatureIntakeTech, updateData.signatureIntakeClient, updateData.signatureDeliveryTech, updateData.signatureDeliveryClient,
+                        updateData.damagePhotos, updateData.photosIntake, updateData.photosDelivery,
+                        now, ticketId
+                    ], function(err) {
+                    if (err) {
+                        console.error('[TICKET PUT] SQL Error:', err.message);
+                        return res.status(500).json({ error: err.message });
+                    }
+
+                    console.log('[TICKET PUT] Update successful, status:', status);
+
+                    // AUTO-WARRANTY ACTIVATION
+                    // Solo si el estado cambia a 'DELIVERED' y NO proviene de un equipo RECHAZADO
+                    if (status === 'DELIVERED' && currentTicket.status !== 'REJECTED') {
+                        console.log('[WARRANTY-AUTO] Triggering automatic warranty for ticket:', ticketId);
+                        warrantyAutomation.createAutomatedRepairWarranty(ticketId)
+                            .catch(err => console.error('[WARRANTY-AUTO] Failed to create automatic warranty:', err.message));
+                    }
+
+                    // Notificar cuando el ticket cambia a QUOTED (cotización lista para revisión)
+                    if (status === 'QUOTED') {
+                        db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], async (err, ticket) => {
+                            if (!err && ticket && ticket.clientEmail) {
+                                const estimatedCost = ticket.estimatedCost || 0;
+                                const laborCost = ticket.laborCost || 0;
+                                const totalCost = estimatedCost + laborCost;
+                                
+                                await sendEmail({
+                                    to: ticket.clientEmail,
+                                    subject: `Ticket #${ticketId.toString().padStart(5, '0')} - Presupuesto Listo para Tu Revisión | LBDC`,
+                                    html: `
+                                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                                        <div style="background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); padding: 30px; text-align: center;">
+                                            <h1 style="color: white; margin: 0; font-size: 24px;">Presupuesto Listo</h1>
+                                            <p style="color: #c7d2fe; margin: 10px 0 0 0;">La Bodega del Computador</p>
+                                        </div>
+                                        <div style="padding: 30px; background: #f8fafc;">
+                                            <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
+                                            <p style="color: #64748b;">Hemos completado el diagnóstico de tu equipo y el presupuesto está listo para tu revisión.</p>
+                                            
+                                            <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                                <h3 style="color: #1e293b; margin: 0 0 15px 0;">Detalles del Servicio</h3>
+                                                <p style="margin: 5px 0;"><strong>Ticket:</strong> #${ticketId.toString().padStart(5, '0')}</p>
+                                                <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.deviceType} ${ticket.brand} ${ticket.model || ''}</p>
+                                                <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
+                                                <p style="margin: 5px 0;"><strong>Diagnóstico:</strong> ${ticket.diagnosis || 'N/A'}</p>
+                                                <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 15px 0;">
+                                                <p style="margin: 5px 0; font-size: 18px;"><strong>Presupuesto Total:</strong> $${totalCost.toLocaleString('es-CO')}</p>
+                                            </div>
+                                            
+                                            <div style="text-align: center; margin-top: 30px;">
+                                                <a href="#" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Ver Informe Técnico y Autorizar</a>
+                                            </div>
+                                        </div>
+                                        <div style="background: #1e293b; padding: 20px; text-align: center;">
+                                            <p style="color: #94a3b8; margin: 0; font-size: 12px;">© 2024 La Bodega del Computador. Todos los derechos reservados.</p>
+                                        </div>
+                                    </div>
+                                `,
+                                    type: 'soporte'
+                                });
+                            }
+                        });
+                    }
+
+                    // Notificar cuando el ticket es autorizado para reparación
+                    if (status === 'AUTHORIZED') {
+                        db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], (err, ticket) => {
+                            if (!err && ticket) {
+                                console.log('[TICKET PUT] Broadcasting AUTHORIZED notification');
+                                notificationRoutes.broadcastNotification('technician', 'ticket', 'Ticket Autorizado', `El ticket #${ticketId} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${ticketId}`);
+                                notificationRoutes.broadcastNotification('admin', 'ticket', 'Ticket Autorizado', `El ticket #${ticketId} ha sido autorizado por el cliente y está listo para reparación. Cliente: ${ticket.clientName}`, `/admin/tech-service?ticket=${ticketId}`);
+                            }
+                        });
+                    }
+
+                    // Crear garantía automáticamente cuando el ticket se marca como "DELIVERED" o "Entregado"
+                    if (status === 'DELIVERED' || status === 'Entregado') {
+                        db.get('SELECT * FROM tickets WHERE id = ?', [ticketId], async (err, ticket) => {
+                            if (!err && ticket) {
+                                const quoteItems = safeParse(ticket.quoteItems) || [];
+                                const laborItems = safeParse(ticket.laborItems) || [];
+                                const hasLabor = laborItems.length > 0;
+                                const hasParts = quoteItems.length > 0;
+
+                                let warrantyInfo = '';
+                                if (hasLabor && hasParts) {
+                                    warrantyInfo = '30 días por mano de obra y 90 días por partes/accesorios';
+                                } else if (hasLabor) {
+                                    warrantyInfo = '30 días por mano de obra';
+                                } else if (hasParts) {
+                                    warrantyInfo = '90 días por partes/accesorios';
+                                }
+
+                                const laborDays = updateData.warrantyLaborDays || (hasLabor ? 30 : 0);
+                                const partsDays = updateData.warrantyPartsDays || (hasParts ? 90 : 0);
+
+                                warrantyAutomation.createCustomWarranty(ticketId, laborDays, partsDays)
+                                    .catch(err => console.error('[WARRANTy-AUTO] Failed to create warranties:', err.message));
+
+                                if (ticket.clientEmail) {
+                                    const estimatedCost = ticket.estimatedCost || 0;
+                                    const laborCost = ticket.laborCost || 0;
+                                    const totalCost = estimatedCost + laborCost;
+                                    
+                                    await sendEmail({
+                                        to: ticket.clientEmail,
+                                        subject: `Ticket #${ticketId.toString().padStart(5, '0')} - Servicio Completado | LBDC`,
+                                        html: `
+                                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                                            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 30px; text-align: center;">
+                                                <h1 style="color: white; margin: 0; font-size: 24px;">✓ Servicio Completado</h1>
+                                                <p style="color: #a7f3d0; margin: 10px 0 0 0;">La Bodega del Computador</p>
+                                            </div>
+                                            <div style="padding: 30px; background: #f8fafc;">
+                                                <p style="color: #334155; font-size: 16px;">Hola <strong>${ticket.clientName}</strong>,</p>
+                                                <p style="color: #64748b;">Tu equipo ha sido reparado y está listo para entrega.</p>
+                                                
+                                                <div style="background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                                                    <h3 style="color: #1e293b; margin: 0 0 15px 0;">Detalles del Servicio</h3>
+                                                    <p style="margin: 5px 0;"><strong>Ticket:</strong> #${ticketId.toString().padStart(5, '0')}</p>
+                                                    <p style="margin: 5px 0;"><strong>Dispositivo:</strong> ${ticket.deviceType} ${ticket.brand} ${ticket.model || ''}</p>
+                                                    <p style="margin: 5px 0;"><strong>Serial:</strong> ${ticket.serial || 'N/A'}</p>
+                                                    <p style="margin: 5px 0;"><strong>Diagnóstico:</strong> ${ticket.diagnosis || 'N/A'}</p>
+                                                    <p style="margin: 5px 0;"><strong>Reparación:</strong> ${ticket.repairNotes || 'N/A'}</p>
+                                                    <p style="margin: 5px 0; font-size: 18px;"><strong>Total Pagado:</strong> $${totalCost.toLocaleString('es-CO')}</p>
+                                                </div>
+                                                
+                                                ${warrantyInfo ? `<p style="color: #64748b; font-size: 14px;">Tu equipo cuenta con garantía: <strong>${warrantyInfo}</strong>.</p>` : ''}
+                                                
+                                                <div style="text-align: center; margin-top: 30px;">
+                                                    <p style="color: #334155; font-weight: bold;">Visítanos para retirar tu equipo</p>
+                                                </div>
+                                            </div>
+                                            <div style="background: #1e293b; padding: 20px; text-align: center;">
+                                                <p style="color: #94a3b8; margin: 0; font-size: 12px;">© 2024 La Bodega del Computador. Todos los derechos reservados.</p>
+                                            </div>
+                                        </div>
+                                    `,
+                                        type: 'soporte'
+                                    });
+                                }
+                            }
+                        });
+                    }
+                    
+                    // Trigger notification if status changed...
+                    res.json({ success: true });
+                });
+            };
+
+            // Ejecutar flujo de validación y actualización
+            checkPhotoPresenceAndUpdate();
         });
     });
     } catch (err) {
@@ -486,8 +671,10 @@ app.post('/api/upload-evidence/:ticketId', authenticateToken, uploadBuffer.array
     const { ticketId } = req.params;
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No images' });
     try {
+        const uploadedPhotos = [];
         for (const file of req.files) {
             const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+            uploadedPhotos.push(dataUrl);
             await new Promise((resolve, reject) => {
                 db.run('INSERT INTO ticket_evidence (ticket_id, photo_data, created_at) VALUES (?, ?, ?)',
                     [parseInt(ticketId), dataUrl, new Date().toISOString()], (err) => {
@@ -500,7 +687,31 @@ app.post('/api/upload-evidence/:ticketId', authenticateToken, uploadBuffer.array
                     });
             });
         }
-        res.json({ success: true });
+
+        // Also update tickets.photosIntake in SQLite for 1-to-1 sync and simple queries
+        db.get('SELECT photosIntake FROM tickets WHERE id = ?', [ticketId], (err, row) => {
+            if (err) {
+                console.error('[UPLOAD] Error querying current photosIntake:', err.message);
+                return res.status(500).json({ error: err.message });
+            }
+
+            let existingPhotos = [];
+            if (row && row.photosIntake) {
+                try {
+                    existingPhotos = JSON.parse(row.photosIntake);
+                } catch (_) { /* ignore parse errors */ }
+            }
+
+            const allPhotos = [...existingPhotos, ...uploadedPhotos];
+
+            db.run('UPDATE tickets SET photosIntake = ? WHERE id = ?', [JSON.stringify(allPhotos), ticketId], (updateErr) => {
+                if (updateErr) {
+                    console.error('[UPLOAD] Error updating tickets.photosIntake:', updateErr.message);
+                    return res.status(500).json({ error: updateErr.message });
+                }
+                res.json({ success: true, count: uploadedPhotos.length });
+            });
+        });
     } catch (error) { 
         console.error('[UPLOAD] Evidence upload failed:', error);
         res.status(500).json({ error: error.message }); 
@@ -549,12 +760,51 @@ app.post('/api/upload-damage-photos/:ticketId', authenticateToken, uploadBuffer.
     }
 });
 
+// --- DELIVERY PHOTOS API ---
+app.post('/api/upload-delivery-photos/:ticketId', authenticateToken, uploadBuffer.array('photos', 5), async (req, res) => {
+    const { ticketId } = req.params;
+    if (!req.files || req.files.length === 0) return res.status(400).json({ error: 'No images' });
+    try {
+        const uploadedPhotos = [];
+        for (const file of req.files) {
+            const dataUrl = `data:${file.mimetype};base64,${file.buffer.toString('base64')}`;
+            uploadedPhotos.push(dataUrl);
+        }
+        
+        db.get('SELECT photosDelivery FROM tickets WHERE id = ?', [ticketId], (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            
+            let existingPhotos = [];
+            if (row && row.photosDelivery) {
+                try {
+                    existingPhotos = JSON.parse(row.photosDelivery);
+                } catch (_) { /* ignore parse errors */ }
+            }
+            
+            const allPhotos = [...existingPhotos, ...uploadedPhotos];
+            
+            db.run('UPDATE tickets SET photosDelivery = ? WHERE id = ?', [JSON.stringify(allPhotos), ticketId], (updateErr) => {
+                if (updateErr) return res.status(500).json({ error: updateErr.message });
+                res.json({ success: true, count: uploadedPhotos.length });
+            });
+        });
+    } catch (error) { 
+        console.error('[UPLOAD] Delivery photos upload failed:', error);
+        res.status(500).json({ error: error.message }); 
+    }
+});
+
 // --- MODULAR ROUTES ---
 app.use('/webhooks', webhookRoutes);
 
 // Users
 app.get('/api/users', authenticateToken, requireAdmin, userRoutes.getUsers);
-app.get('/api/users/:id', authenticateToken, requireAdmin, userRoutes.getUser);
+app.get('/api/users/:id', authenticateToken, (req, res, next) => {
+    if (req.user && (req.user.role === 'admin' || req.user.id === parseInt(req.params.id))) {
+        return next();
+    }
+    return requireAdmin(req, res, next);
+}, userRoutes.getUser);
 app.post('/api/users', authenticateToken, requireAdmin, userRoutes.createUser);
 app.put('/api/users/:id', authenticateToken, requireAdmin, userRoutes.updateUser);
 app.delete('/api/users/:id', authenticateToken, requireAdmin, userRoutes.deleteUser);
@@ -574,10 +824,10 @@ app.get('/api/customers', authenticateToken, requireRole(['admin', 'vendedor', '
 app.get('/api/customers/export', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.exportCustomers);
 app.get('/api/customers/stats', authenticateToken, requireAdmin, customerRoutes.getCustomerStats);
 app.get('/api/customers/search', authenticateToken, customerRoutes.searchCustomers);
-app.get('/api/customers/birthdays', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.getBirthdayCustomers);
+app.get('/api/customers/birthdays', authenticateToken, requireRole(['admin', 'vendedor', 'tecnico', 'technician', 'técnico']), customerRoutes.getBirthdayCustomers);
 app.get('/api/customers/:id', authenticateToken, customerRoutes.getCustomer);
-app.post('/api/customers', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.createCustomer);
-app.put('/api/customers/:id', authenticateToken, requireRole(['admin', 'vendedor']), customerRoutes.updateCustomer);
+app.post('/api/customers', authenticateToken, requireRole(['admin', 'vendedor', 'tecnico', 'technician', 'técnico']), customerRoutes.createCustomer);
+app.put('/api/customers/:id', authenticateToken, requireRole(['admin', 'vendedor', 'tecnico', 'technician', 'técnico']), customerRoutes.updateCustomer);
 app.delete('/api/customers/:id', authenticateToken, requireAdmin, customerRoutes.deleteCustomer);
 app.post('/api/customers/import', authenticateToken, requireAdmin, uploadBuffer.single('file'), customerRoutes.importCustomers);
 

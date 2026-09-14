@@ -12,8 +12,9 @@ export const validators = {
     // Validar teléfono (formato colombiano básico)
     isValidPhone: (phone) => {
         if (!phone) return true; // Opcional
-        const phoneRegex = /^(\+57|57)?[3][0-9]{9}$/;
-        return phoneRegex.test(phone.replace(/\s|-/g, ''));
+        const cleaned = phone.replace(/[\s\-\(\)\.]/g, '');
+        const phoneRegex = /^\+?[0-9]{7,15}$/;
+        return phoneRegex.test(cleaned);
     },
     
     // Validar que no esté vacío
@@ -176,7 +177,7 @@ export const customerValidations = [
     { 
         field: 'phone', 
         checks: [
-            { validator: (val) => !val || validators.isValidPhone(val) ? { valid: true } : { valid: false, message: 'Teléfono inválido (formato: +573XXXXXXXXX)' } },
+            { validator: (val) => !val || validators.isValidPhone(val) ? { valid: true } : { valid: false, message: 'Teléfono inválido (mínimo 7 dígitos, ej: +573XXXXXXXXX o 60XXXXXXXX)' } },
             { validator: 'async', asyncValidator: async (val, body, params) => {
                 if (!val) return { valid: true };
                 return await validators.isPhoneUnique(val, params.id);
@@ -211,7 +212,7 @@ export const orderValidations = [
         field: 'customerPhone', 
         checks: [
             { validator: (val) => validators.isNotEmpty(val, 'Teléfono') },
-            { validator: (val) => validators.isValidPhone(val) ? { valid: true } : { valid: false, message: 'Teléfono inválido' } }
+            { validator: (val) => validators.isValidPhone(val) ? { valid: true } : { valid: false, message: 'Teléfono inválido (mínimo 7 dígitos)' } }
         ]
     },
     { 

@@ -23,6 +23,289 @@ const getAbsoluteUrl = (path, baseUrl) => {
     return `${cleanBase}${cleanPath}`;
 };
 
+// ── SHARED PDF BUILDER ─────────────────────────────────────────────────────
+// Draws the premium Comprobante de Ingreso into an existing PDFDocument.
+// Does NOT call doc.end() — the caller is responsible for that.
+const buildIntakePDF = (doc, ticket, settings) => {
+    const W   = 595;          // A4 width in points
+    const M   = 40;           // left/right margin
+    const CW  = W - 2 * M;   // usable content width = 515
+
+    // ── HEADER BAND ────────────────────────────────────────────────────────
+    doc.rect(0, 0, W, 68).fill('#1e293b');
+    doc.rect(0, 68, W, 5).fill('#2563eb');
+
+    // Left: business name
+    doc.fillColor('white').font('Helvetica-Bold').fontSize(15)
+       .text(settings.businessName || 'La Bodega del Computador', M, 16, { width: 310 });
+    doc.fillColor('#93c5fd').font('Helvetica').fontSize(8)
+       .text('Laboratorio de Servicio Técnico Especializado', M, 36);
+
+    // Right: document type + order number + date
+    doc.fillColor('#93c5fd').font('Helvetica').fontSize(7)
+       .text('COMPROBANTE DE INGRESO', W - M - 160, 14, { width: 160, align: 'right' });
+    doc.fillColor('#60a5fa').font('Helvetica-Bold').fontSize(11)
+       .text(`Orden No. #${ticket.id}`, W - M - 160, 27, { width: 160, align: 'right' });
+    const dateStr = new Date(ticket.createdAt).toLocaleDateString('es-CO', {
+        year: 'numeric', month: 'long', day: 'numeric'
+    });
+    doc.fillColor('#94a3b8').font('Helvetica').fontSize(7)
+       .text(dateStr, W - M - 160, 42, { width: 160, align: 'right' });
+
+    let y = 85;
+
+    // ── CLIENT + DEVICE INFO CARDS ─────────────────────────────────────────
+    const cardH = 82;
+    const colW  = Math.floor(CW / 2) - 8;
+    const col1X = M;
+    const col2X = M + colW + 16;
+
+    // Card 1 – Client
+    doc.roundedRect(col1X, y, colW, cardH, 5).fill('#f8fafc').stroke('#e2e8f0');
+    doc.rect(col1X, y + 5, 3, cardH - 10).fill('#2563eb');
+    doc.fillColor('#2563eb').font('Helvetica-Bold').fontSize(7)
+       .text('INFORMACIÓN DEL CLIENTE', col1X + 10, y + 8);
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10)
+       .text(ticket.clientName || '', col1X + 10, y + 21, { width: colW - 18 });
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+       .text(`Tel: ${ticket.clientPhone || ''}`, col1X + 10, y + 35, { width: colW - 18 });
+    if (ticket.clientEmail) {
+        doc.text(`Email: ${ticket.clientEmail}`, col1X + 10, y + 47, { width: colW - 18 });
+    }
+
+    // Card 2 – Device
+    doc.roundedRect(col2X, y, colW, cardH, 5).fill('#f8fafc').stroke('#e2e8f0');
+    doc.rect(col2X, y + 5, 3, cardH - 10).fill('#2563eb');
+    doc.fillColor('#2563eb').font('Helvetica-Bold').fontSize(7)
+       .text('DETALLES DEL EQUIPO', col2X + 10, y + 8);
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(10)
+       .text(`${ticket.brand || ''} ${ticket.model || ''}`.trim(), col2X + 10, y + 21, { width: colW - 18 });
+    doc.fillColor('#64748b').font('Helvetica').fontSize(8)
+       .text(`Tipo: ${ticket.deviceType || ''}`, col2X + 10, y + 35, { width: colW - 18 });
+    doc.text(`Serial: ${ticket.serial || 'S/N'}`, col2X + 10, y + 47, { width: colW - 18 });
+    if (ticket.technicianName) {
+        doc.text(`Técnico: ${ticket.technicianName}`, col2X + 10, y + 59, { width: colW - 18 });
+    }
+
+    y += cardH + 16;
+
+    // ── SECTION BLOCK HELPER ───────────────────────────────────────────────
+    // Draws a labelled content card with a coloured left accent stripe.
+    const drawBlock = (label, text, accentColor, bgColor) => {
+        if (!text) return;
+        doc.fillColor(accentColor).font('Helvetica-Bold').fontSize(7).text(label, M, y);
+        y += 11;
+        const textH = doc.font('Helvetica').fontSize(9).heightOfString(text, { width: CW - 18 });
+        const boxH  = Math.max(32, textH + 16);
+        if (y + boxH > 778) { doc.addPage(); y = 50; }
+        doc.roundedRect(M, y, CW, boxH, 5).fill(bgColor).stroke('#e2e8f0');
+        doc.rect(M, y + 4, 3, boxH - 8).fill(accentColor);
+        doc.fillColor('#334155').font('Helvetica').fontSize(9)
+           .text(text, M + 10, y + 8, { width: CW - 18, align: 'justify' });
+        y += boxH + 12;
+    };
+
+    // ── ISSUE DESCRIPTION ──────────────────────────────────────────────────
+    drawBlock('PROBLEMA REPORTADO', ticket.issueDescription || '', '#2563eb', '#f8fafc');
+
+    // ── DIAGNOSIS (if exists) ──────────────────────────────────────────────
+    if (ticket.diagnosis) {
+        drawBlock('DIAGNÓSTICO TÉCNICO', ticket.diagnosis, '#059669', '#f0fdf4');
+    }
+
+    // ── REPAIR NOTES + LABOR ITEMS ─────────────────────────────────────────
+    const laborItems = safeParse(ticket.laborItems) || [];
+    if (ticket.repairNotes || laborItems.length > 0) {
+        doc.fillColor('#7c3aed').font('Helvetica-Bold').fontSize(7).text('TRABAJOS REALIZADOS', M, y);
+        y += 11;
+
+        const repairH = ticket.repairNotes
+            ? doc.font('Helvetica').fontSize(9).heightOfString(ticket.repairNotes, { width: CW - 18 })
+            : 0;
+        const laborH = laborItems.length > 0 ? 14 + laborItems.length * 13 : 0;
+        const boxH   = Math.max(32, repairH + laborH + 16);
+
+        if (y + boxH > 778) { doc.addPage(); y = 50; }
+
+        doc.roundedRect(M, y, CW, boxH, 5).fill('#faf5ff').stroke('#e2e8f0');
+        doc.rect(M, y + 4, 3, boxH - 8).fill('#7c3aed');
+
+        let ty = y + 8;
+        if (ticket.repairNotes) {
+            doc.fillColor('#334155').font('Helvetica').fontSize(9)
+               .text(ticket.repairNotes, M + 10, ty, { width: CW - 18, align: 'justify' });
+            ty += repairH + 6;
+        }
+        if (laborItems.length > 0) {
+            doc.fillColor('#6d28d9').font('Helvetica-Bold').fontSize(7)
+               .text('ACTIVIDADES:', M + 10, ty);
+            ty += 12;
+            laborItems.forEach(item => {
+                doc.fillColor('#4c1d95').font('Helvetica').fontSize(9)
+                   .text(`• ${item.description || 'Mano de Obra'}`, M + 16, ty, { width: CW - 26 });
+                ty += 13;
+            });
+        }
+        y += boxH + 12;
+    }
+
+    // ── BUDGET TABLE ───────────────────────────────────────────────────────
+    const quoteItems    = safeParse(ticket.quoteItems) || [];
+    const totalLaborCost = laborItems.reduce((s, i) => s + (i.price || 0), 0);
+    const totalQuoteCost = quoteItems.reduce((s, i) => s + (i.price * i.quantity), 0);
+    const totalCost     = totalLaborCost + totalQuoteCost;
+
+    if (quoteItems.length > 0 || laborItems.length > 0) {
+        doc.fillColor('#059669').font('Helvetica-Bold').fontSize(7).text('PRESUPUESTO DEL SERVICIO', M, y);
+        y += 11;
+
+        const rowH     = 18;
+        const headerH  = 22;
+        const totalRowH = 26;
+        const tableH   = headerH + (quoteItems.length + laborItems.length) * rowH + totalRowH;
+
+        if (y + tableH > 778) { doc.addPage(); y = 50; }
+
+        // Table header row
+        doc.rect(M, y, CW, headerH).fill('#1e293b');
+        doc.fillColor('white').font('Helvetica-Bold').fontSize(8)
+           .text('ÍTEM / DESCRIPCIÓN', M + 8, y + 7, { width: CW - 120 });
+        doc.text('CANT', M + CW - 108, y + 7, { width: 40, align: 'center' });
+        doc.text('PRECIO', M + CW - 62, y + 7, { width: 57, align: 'right' });
+        y += headerH;
+
+        // Parts / quote rows
+        quoteItems.forEach((item, i) => {
+            doc.rect(M, y, CW, rowH).fill(i % 2 === 0 ? 'white' : '#f8fafc').stroke('#e2e8f0');
+            doc.fillColor('#334155').font('Helvetica').fontSize(8)
+               .text(item.name || item.description || 'Repuesto', M + 8, y + 5, { width: CW - 120 });
+            doc.text(String(item.quantity), M + CW - 108, y + 5, { width: 40, align: 'center' });
+            doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+               .text(`$${(item.price * item.quantity).toLocaleString('es-CO')}`, M + CW - 62, y + 5, { width: 57, align: 'right' });
+            y += rowH;
+        });
+
+        // Labor rows
+        laborItems.forEach((item, i) => {
+            const idx = i + quoteItems.length;
+            doc.rect(M, y, CW, rowH).fill(idx % 2 === 0 ? 'white' : '#f8fafc').stroke('#e2e8f0');
+            doc.fillColor('#b45309').font('Helvetica-Bold').fontSize(8)
+               .text(`${item.description || 'Mano de Obra'} (M.O.)`, M + 8, y + 5, { width: CW - 120 });
+            doc.text('1', M + CW - 108, y + 5, { width: 40, align: 'center' });
+            doc.text(`$${(item.price || 0).toLocaleString('es-CO')}`, M + CW - 62, y + 5, { width: 57, align: 'right' });
+            y += rowH;
+        });
+
+        // Total row
+        doc.rect(M, y, CW, totalRowH).fill('#0f172a');
+        doc.fillColor('white').font('Helvetica-Bold').fontSize(10).text('VALOR TOTAL', M + 8, y + 8);
+        doc.fillColor('#10b981').font('Helvetica-Bold').fontSize(13)
+           .text(`$${totalCost.toLocaleString('es-CO')}`, M, y + 7, { width: CW - 8, align: 'right' });
+        y += totalRowH + 18;
+    }
+
+    // ── SIGNATURE BLOCKS ───────────────────────────────────────────────────
+    if (y + 85 > 778) { doc.addPage(); y = 50; }
+
+    const sigLineW = 155;
+    const sig1X    = 60;
+    const sig2X    = W - 60 - sigLineW;
+    const sigTop   = y + 10;
+
+    if (ticket.signatureIntakeTech) {
+        try { doc.image(ticket.signatureIntakeTech, sig1X, sigTop, { height: 38 }); }
+        catch(e) { /* ignore bad data-uri */ }
+    }
+    doc.strokeColor('#334155').lineWidth(0.5)
+       .moveTo(sig1X, sigTop + 42).lineTo(sig1X + sigLineW, sigTop + 42).stroke();
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+       .text('Recibido por LBDC', sig1X, sigTop + 46, { width: sigLineW, align: 'center' });
+    doc.fillColor('#64748b').font('Helvetica').fontSize(7)
+       .text('Técnico Responsable', sig1X, sigTop + 57, { width: sigLineW, align: 'center' });
+
+    if (ticket.signatureIntakeClient) {
+        try { doc.image(ticket.signatureIntakeClient, sig2X, sigTop, { height: 38 }); }
+        catch(e) { /* ignore bad data-uri */ }
+    }
+    doc.strokeColor('#334155').lineWidth(0.5)
+       .moveTo(sig2X, sigTop + 42).lineTo(sig2X + sigLineW, sigTop + 42).stroke();
+    doc.fillColor('#1e293b').font('Helvetica-Bold').fontSize(8)
+       .text('Acepto Condiciones', sig2X, sigTop + 46, { width: sigLineW, align: 'center' });
+    doc.fillColor('#64748b').font('Helvetica').fontSize(7)
+       .text('Firma del Cliente', sig2X, sigTop + 57, { width: sigLineW, align: 'center' });
+
+    // ── FOOTER ────────────────────────────────────────────────────────────
+    doc.rect(0, 815, W, 27).fill('#f1f5f9');
+    doc.rect(0, 815, W, 3).fill('#2563eb');
+    doc.fillColor('#64748b').font('Helvetica').fontSize(7)
+       .text(
+           `${settings.businessAddress || ''} | WhatsApp: ${settings.whatsappNumber || ''}`,
+           M, 822, { width: CW, align: 'center' }
+       );
+
+    // ── PHOTO PAGES HELPER ─────────────────────────────────────────────────
+    const drawPhotoPage = (photos, title, accentColor) => {
+        if (!photos || photos.length === 0) return;
+        doc.addPage();
+
+        // Page header strip
+        doc.rect(0, 0, W, 40).fill('#1e293b');
+        doc.rect(0, 40, W, 4).fill(accentColor);
+        doc.fillColor('white').font('Helvetica-Bold').fontSize(13)
+           .text(title, M, 12, { width: CW, align: 'center' });
+
+        let px = M;
+        let py = 56;
+        const imgW = 240;
+        const imgH = 172;
+        const gap  = 15;
+
+        photos.forEach((photo, index) => {
+            if (index % 2 !== 0) {
+                px = M + imgW + gap;
+            } else if (index > 0) {
+                px = M;
+                py += imgH + gap;
+            }
+
+            if (py + imgH > 780) {
+                doc.addPage();
+                doc.rect(0, 0, W, 40).fill('#1e293b');
+                doc.rect(0, 40, W, 4).fill(accentColor);
+                doc.fillColor('white').font('Helvetica-Bold').fontSize(12)
+                   .text(`${title} (cont.)`, M, 12, { width: CW, align: 'center' });
+                py = 56;
+                px = M;
+            }
+
+            try {
+                doc.roundedRect(px, py, imgW, imgH, 4).fill('#f1f5f9').stroke('#e2e8f0');
+                doc.image(photo, px + 2, py + 2, { width: imgW - 4, height: imgH - 4 });
+            } catch(e) {
+                doc.roundedRect(px, py, imgW, imgH, 4).fill('#f1f5f9').stroke('#e2e8f0');
+                doc.fillColor('#94a3b8').font('Helvetica').fontSize(8)
+                   .text('Imagen no disponible', px, py + imgH / 2 - 4, { width: imgW, align: 'center' });
+            }
+        });
+    };
+
+    // Intake evidence photos
+    const legacyPhotos     = safeParse(ticket.photosIntake) || [];
+    const validLegacy      = legacyPhotos.filter(p => p && !p.startsWith('blob:'));
+    const dbEvidencePhotos = (ticket.dbEvidence || []).map(ev => ev.photo_data);
+    const intakePhotos     = [...validLegacy, ...dbEvidencePhotos];
+    drawPhotoPage(intakePhotos, 'EVIDENCIA FOTOGRÁFICA DE INGRESO', '#2563eb');
+
+    // Diagnostic / damage photos
+    const damagePhotos = safeParse(ticket.damagePhotos) || [];
+    drawPhotoPage(damagePhotos, 'EVIDENCIA FOTOGRÁFICA DE DIAGNÓSTICO', '#dc2626');
+
+    // Delivery / repaired device photos
+    const deliveryPhotos = safeParse(ticket.photosDelivery) || [];
+    drawPhotoPage(deliveryPhotos, 'EVIDENCIA FOTOGRÁFICA DE ENTREGA', '#10b981');
+};
+// ──────────────────────────────────────────────────────────────────────────
+
 const generateIntakeHtml = (ticket, evidenceList = [], baseUrl = '', settings = {}) => {
     const date = new Date(ticket.createdAt).toLocaleDateString('es-CO', {
         year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit'
@@ -35,6 +318,14 @@ const generateIntakeHtml = (ticket, evidenceList = [], baseUrl = '', settings = 
         const evidenceData = (evidenceList || []).map(ev => ev.photo_data);
         photos = [...validLegacy, ...evidenceData];
     } catch { photos = []; }
+
+    const laborItems = safeParse(ticket.laborItems) || [];
+    const damagePhotos = safeParse(ticket.damagePhotos) || [];
+    const deliveryPhotos = safeParse(ticket.photosDelivery) || [];
+    const quoteItems = safeParse(ticket.quoteItems) || [];
+    const totalLaborCost = laborItems.reduce((sum, item) => sum + (item.price || 0), 0);
+    const totalQuoteCost = quoteItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    const totalCost = totalLaborCost + totalQuoteCost;
 
     return `
 <!DOCTYPE html>
@@ -113,7 +404,79 @@ const generateIntakeHtml = (ticket, evidenceList = [], baseUrl = '', settings = 
             </div>
             <div class="section-header">Problema Reportado</div>
             <div class="description-box">${ticket.issueDescription}</div>
-            ${photos.length > 0 ? `<div class="photo-grid">${photos.map(p => `<div class="photo-card"><img src="${getAbsoluteUrl(p, baseUrl)}"></div>`).join('')}</div>` : ''}
+            ${ticket.diagnosis ? `
+            <div class="section-header" style="margin-top: 15px; color: #059669;">Diagnóstico Técnico</div>
+            <div class="description-box" style="border-left-color: #10b981; background: #f0fdf4;">${ticket.diagnosis}</div>
+            ` : ''}
+
+            ${(ticket.repairNotes || laborItems.length > 0) ? `
+            <div class="section-header" style="margin-top: 15px; color: #7c3aed;">Trabajos Realizados</div>
+            <div class="description-box" style="border-left-color: #8b5cf6; background: #faf5ff;">
+                ${ticket.repairNotes ? `<p style="margin-bottom: 5px;">${ticket.repairNotes}</p>` : ''}
+                ${laborItems.length > 0 ? `
+                <div style="margin-top: 8px; border-top: 1px dashed #e2e8f0; padding-top: 8px;">
+                    <strong style="font-size: 8px; color: #6d28d9; text-transform: uppercase;">Actividades:</strong>
+                    <ul style="margin: 5px 0 0 0; padding-left: 15px; font-size: 11px; color: #4c1d95;">
+                        ${laborItems.map(item => `<li>${item.description || 'Mano de Obra'}</li>`).join('')}
+                    </ul>
+                </div>
+                ` : ''}
+            </div>
+            ` : ''}
+
+            ${(quoteItems.length > 0 || laborItems.length > 0) ? `
+            <div class="section-header" style="margin-top: 15px; color: #059669;">Presupuesto de Intervención</div>
+            <div style="border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+                    <thead>
+                        <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
+                            <th style="text-align: left; padding: 8px; font-weight: 800; color: var(--text-light); text-transform: uppercase;">Ítem / Descripción</th>
+                            <th style="text-align: center; padding: 8px; font-weight: 800; color: var(--text-light); text-transform: uppercase; width: 60px;">Cant</th>
+                            <th style="text-align: right; padding: 8px; font-weight: 800; color: var(--text-light); text-transform: uppercase; width: 100px;">Precio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${quoteItems.map(item => `
+                        <tr style="border-bottom: 1px solid var(--border);">
+                            <td style="padding: 8px; font-weight: 600;">${item.name || item.description || 'Repuesto'}</td>
+                            <td style="text-align: center; padding: 8px;">${item.quantity}</td>
+                            <td style="text-align: right; padding: 8px; font-weight: 700;">$${(item.price * item.quantity).toLocaleString('es-CO')}</td>
+                        </tr>
+                        `).join('')}
+                        ${laborItems.map(item => `
+                        <tr style="border-bottom: 1px solid var(--border); background-color: #fffdf5;">
+                            <td style="padding: 8px; font-weight: 700; color: #b45309;">${item.description || 'Mano de Obra'} (Mano de Obra)</td>
+                            <td style="text-align: center; padding: 8px;">1</td>
+                            <td style="text-align: right; padding: 8px; font-weight: 700; color: #b45309;">$${(item.price || 0).toLocaleString('es-CO')}</td>
+                        </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+                <div style="background: var(--text-dark); color: white; padding: 12px; display: flex; justify-content: space-between; align-items: center; font-size: 13px; font-weight: 800;">
+                    <span>VALOR TOTAL</span>
+                    <span style="color: #10b981; font-size: 16px;">$${totalCost.toLocaleString('es-CO')}</span>
+                </div>
+            </div>
+            ` : ''}
+
+            ${photos.length > 0 ? `
+            <div class="section-header" style="margin-top: 20px;">Evidencia Fotográfica de Ingreso</div>
+            <div class="photo-grid">${photos.map(p => `<div class="photo-card"><img src="${getAbsoluteUrl(p, baseUrl)}"></div>`).join('')}</div>
+            ` : ''}
+
+            ${damagePhotos.length > 0 ? `
+            <div class="section-header" style="margin-top: 20px; color: #dc2626;">Evidencia de Diagnóstico (Fallas)</div>
+            <div class="photo-grid">
+                ${damagePhotos.map(p => `<div class="photo-card" style="border-color: #fca5a5;"><img src="${getAbsoluteUrl(p, baseUrl)}"></div>`).join('')}
+            </div>
+            ` : ''}
+
+            ${deliveryPhotos.length > 0 ? `
+            <div class="section-header" style="margin-top: 20px; color: #10b981;">Evidencia de Entrega (Equipo Reparado)</div>
+            <div class="photo-grid">
+                ${deliveryPhotos.map(p => `<div class="photo-card" style="border-color: #a7f3d0;"><img src="${getAbsoluteUrl(p, baseUrl)}"></div>`).join('')}
+            </div>
+            ` : ''}
             
             <div class="signatures">
                 <div class="sign-box">
@@ -182,68 +545,17 @@ export const sendIntakeReceipt = async (req, res) => {
         let targetEmail = email || ticket.clientEmail;
         if (!targetEmail) return res.json({ success: false, message: 'No hay email válido' });
 
-        const doc = new PDFDocument({ size: 'A4', margin: 40 });
+        // ── Build PDF with premium layout ──────────────────────────────────
+        const doc = new PDFDocument({ size: 'A4', margin: 0 });
         let chunks = [];
         doc.on('data', c => chunks.push(c));
         const pdfGenerated = new Promise(resolve => {
             doc.on('end', () => resolve(Buffer.concat(chunks)));
-            
-            // Header
-            doc.fillColor('#1e293b').fontSize(18).text(settings.businessName, { align: 'center', weight: 'bold' });
-            doc.fontSize(8).text('Laboratorio de Servicio Técnico Especializado', { align: 'center' });
-            doc.moveDown(0.5);
-            doc.strokeColor('#2563eb').lineWidth(2).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
-            doc.moveDown();
-
-            // ID Badge
-            doc.fontSize(14).fillColor('#2563eb').text(`COMPROBANTE DE INGRESO #${ticket.id}`, { align: 'right' });
-            doc.fillColor('#64748b').fontSize(9).text(new Date(ticket.createdAt).toLocaleString('es-CO'), { align: 'right' });
-            doc.moveDown();
-
-            // Client Info
-            doc.fillColor('#1e293b').fontSize(11).text('INFORMACIÓN DEL CLIENTE', { underline: true });
-            doc.fontSize(10).text(`Nombre: ${ticket.clientName}`);
-            doc.text(`Teléfono: ${ticket.clientPhone}`);
-            doc.text(`Email: ${ticket.clientEmail || 'N/A'}`);
-            doc.moveDown();
-
-            // Device Info
-            doc.fontSize(11).text('DETALLES DEL EQUIPO', { underline: true });
-            doc.fontSize(10).text(`Marca: ${ticket.brand}`);
-            doc.text(`Modelo: ${ticket.model || 'N/A'}`);
-            doc.text(`Tipo: ${ticket.deviceType}`);
-            doc.text(`Serial: ${ticket.serial || 'S/N'}`);
-            doc.moveDown();
-
-            // Issue description
-            doc.fontSize(11).text('PROBLEMA REPORTADO', { underline: true });
-            doc.fontSize(10).fillColor('#334155').text(ticket.issueDescription, { align: 'justify' });
-            doc.moveDown(2);
-
-            // Signatures
-            const signatureY = doc.y;
-            if (ticket.signatureIntakeTech) {
-                try {
-                    doc.image(ticket.signatureIntakeTech, 60, signatureY, { height: 40 });
-                } catch (e) { console.error('Error drawing tech signature', e); }
-            }
-            doc.strokeColor('#1e293b').lineWidth(1).moveTo(60, signatureY + 40).lineTo(220, signatureY + 40).stroke();
-            doc.fontSize(9).text('Firma Recepción', 60, signatureY + 45, { width: 160, align: 'center' });
-
-            if (ticket.signatureIntakeClient) {
-                try {
-                    doc.image(ticket.signatureIntakeClient, 360, signatureY, { height: 40 });
-                } catch (e) { console.error('Error drawing client signature', e); }
-            }
-            doc.strokeColor('#1e293b').lineWidth(1).moveTo(360, signatureY + 40).lineTo(520, signatureY + 40).stroke();
-            doc.text('Firma Cliente', 360, signatureY + 45, { width: 160, align: 'center' });
-
-            // Footer
-            doc.fontSize(8).fillColor('#94a3b8').text(`${settings.businessAddress} | WhatsApp: ${settings.whatsappNumber}`, 40, 750, { align: 'center' });
-            
+            buildIntakePDF(doc, ticket, settings);
             doc.end();
         });
         const pdfContent = await pdfGenerated;
+        // ───────────────────────────────────────────────────────────────────
 
         await sendEmail({
             to: targetEmail,
@@ -310,96 +622,14 @@ export const generatePDF = (req, res) => {
     };
     fetch().then(ticket => {
         if (!ticket) return res.status(404).json({ error: 'No encontrado' });
-        const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+        // ── Build PDF with premium layout ──────────────────────────────────
+        const doc = new PDFDocument({ size: 'A4', margin: 0 });
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename=Comprobante_Ingreso_${ticket.id}.pdf`);
         doc.pipe(res);
-        
-        // Header
-        doc.fillColor('#1e293b').fontSize(18).text(settings.businessName, { align: 'center', weight: 'bold' });
-        doc.fontSize(8).text('Laboratorio de Servicio Técnico Especializado', { align: 'center' });
-        doc.moveDown(0.5);
-        doc.strokeColor('#2563eb').lineWidth(2).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
-        doc.moveDown();
-
-        // ID Badge
-        doc.fontSize(14).fillColor('#2563eb').text(`COMPROBANTE DE INGRESO #${ticket.id}`, { align: 'right' });
-        doc.fillColor('#64748b').fontSize(9).text(new Date(ticket.createdAt).toLocaleString('es-CO'), { align: 'right' });
-        doc.moveDown();
-
-        // Data Grid (Partial Simulation)
-        doc.fillColor('#1e293b').fontSize(11).text('DATOS DEL SERVICIO', { underline: true });
-        doc.moveDown(0.5);
-        doc.fontSize(10).text(`Cliente:`, { continued: true }).text(` ${ticket.clientName}`, { weight: 'bold' });
-        doc.text(`Teléfono:`, { continued: true }).text(` ${ticket.clientPhone}`);
-        doc.text(`Equipo:`, { continued: true }).text(` ${ticket.brand} ${ticket.model || ''}`);
-        doc.text(`Serial:`, { continued: true }).text(` ${ticket.serial || 'S/N'}`);
-        doc.moveDown();
-
-        doc.fontSize(11).text('FALLA REPORTADA', { underline: true });
-        doc.fontSize(10).fillColor('#334155').text(ticket.issueDescription, { align: 'justify' });
-        doc.moveDown(2);
-
-        // Signatures
-        const signatureY = Math.min(doc.y + 20, 680);
-        if (ticket.signatureIntakeTech) {
-            try {
-                doc.image(ticket.signatureIntakeTech, 60, signatureY, { height: 40 });
-            } catch (e) { console.error('Error drawing intake tech signature', e); }
-        }
-        doc.strokeColor('#1e293b').lineWidth(1).moveTo(60, signatureY + 40).lineTo(220, signatureY + 40).stroke();
-        doc.fontSize(9).text('Recibido por LBDC', 60, signatureY + 45, { width: 160, align: 'center' });
-
-        if (ticket.signatureIntakeClient) {
-            try {
-                doc.image(ticket.signatureIntakeClient, 360, signatureY, { height: 40 });
-            } catch (e) { console.error('Error drawing intake client signature', e); }
-        }
-        doc.strokeColor('#1e293b').lineWidth(1).moveTo(360, signatureY + 40).lineTo(520, signatureY + 40).stroke();
-        doc.text('Acepto Condiciones', 360, signatureY + 45, { width: 160, align: 'center' });
-
-        // Photos Page
-        if (ticket.dbEvidence && ticket.dbEvidence.length > 0) {
-            doc.addPage();
-            doc.fillColor('#2563eb').fontSize(14).text('EVIDENCIA FOTOGRÁFICA DE INGRESO', { align: 'center', underline: true });
-            doc.moveDown();
-            
-            let currentX = 50;
-            let currentY = doc.y + 20;
-            const imgWidth = 240;
-            const imgHeight = 180;
-            const margin = 20;
-
-            ticket.dbEvidence.forEach((ev, index) => {
-                // If odd index, move to second column
-                if (index % 2 !== 0) {
-                    currentX = 50 + imgWidth + margin;
-                } else if (index > 0) {
-                    // If even index (except first), move to next row
-                    currentX = 50;
-                    currentY += imgHeight + margin;
-                }
-
-                // Check for page break
-                if (currentY + imgHeight > 750) {
-                    doc.addPage();
-                    doc.fillColor('#2563eb').fontSize(12).text('EVIDENCIA FOTOGRÁFICA (Cont.)', { align: 'center' });
-                    currentY = 100;
-                    currentX = 50;
-                }
-
-                try {
-                    doc.image(ev.photo_data, currentX, currentY, { width: imgWidth, height: imgHeight });
-                    doc.rect(currentX, currentY, imgWidth, imgHeight).strokeColor('#e2e8f0').lineWidth(1).stroke();
-                } catch (e) { 
-                    console.error('Error drawing PDF image', e);
-                }
-            });
-        }
-
-        // Footer
-        doc.fontSize(8).fillColor('#94a3b8').text(`${settings.businessAddress} | PBX: ${settings.whatsappNumber}`, 40, 780, { align: 'center' });
-
+        buildIntakePDF(doc, ticket, settings);
         doc.end();
+        // ───────────────────────────────────────────────────────────────────
     });
 };

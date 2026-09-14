@@ -604,9 +604,9 @@ const isValidEmail = (email) => {
 
 const isValidPhone = (phone) => {
     if (!phone) return true;
-    const cleanPhone = phone.replace(/\s|-|\(|\)/g, '');
-    // Allow Colombian landlines or mobiles (7 to 10 digits) with optional +57 prefix
-    const phoneRegex = /^(?:\+57|57)?\d{7,10}$/;
+    const cleanPhone = phone.replace(/\s|-|\(|\)|\./g, '');
+    // Allow any number of 7 to 15 digits, optionally prefixed with '+'
+    const phoneRegex = /^\+?\d{7,15}$/;
     return phoneRegex.test(cleanPhone);
 };
 

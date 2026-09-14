@@ -2,55 +2,65 @@ import React, { useEffect, useRef } from 'react';
 
 const GoogleLoginButton = ({ onSuccess, onError, text = 'signin_with' }) => {
     const googleButtonRef = useRef(null);
+    const initializedRef = useRef(false);
+    const callbacksRef = useRef({ onSuccess, onError });
+
+    useEffect(() => {
+        callbacksRef.current = { onSuccess, onError };
+    }, [onSuccess, onError]);
 
     useEffect(() => {
         const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-        
-        if (!clientId) {
-            console.error('VITE_GOOGLE_CLIENT_ID not found in environment variables');
-            return;
-        }
+        if (!clientId) return;
 
-        const initializeGoogleLogin = () => {
-            if (!window.google) return;
+        const init = () => {
+            if (!window.google || !googleButtonRef.current || initializedRef.current) return;
+            
+            try {
+                window.google.accounts.id.initialize({
+                    client_id: clientId,
+                    callback: (res) => {
+                        if (res.credential) {
+                            callbacksRef.current.onSuccess(res.credential);
+                        } else {
+                            callbacksRef.current.onError('No se recibió la credencial de Google');
+                        }
+                    },
+                    auto_select: false
+                });
 
-            window.google.accounts.id.initialize({
-                client_id: clientId,
-                callback: (response) => {
-                    if (response.credential) {
-                        onSuccess(response.credential);
-                    } else {
-                        onError('No se recibió la credencial de Google');
-                    }
-                },
-            });
-
-            window.google.accounts.id.renderButton(googleButtonRef.current, {
-                theme: 'outline',
-                size: 'large',
-                width: '100%',
-                text: text,
-                shape: 'rectangular',
-            });
-
-            // Optional: One Tap
-            // window.google.accounts.id.prompt(); 
+                window.google.accounts.id.renderButton(googleButtonRef.current, {
+                    theme: 'outline', 
+                    size: 'large', 
+                    width: 320, 
+                    text, 
+                    shape: 'rectangular'
+                });
+                
+                initializedRef.current = true;
+            } catch (e) { 
+                console.error('Google GSI Init Error:', e); 
+            }
         };
 
-        // Load script dynamically if not present
-        if (!window.google) {
-            const script = document.createElement('script');
-            script.src = 'https://accounts.google.com/gsi/client';
-            script.async = true;
-            script.defer = true;
-            script.onload = initializeGoogleLogin;
-            document.head.appendChild(script);
-        } else {
-            initializeGoogleLogin();
-        }
-    }, [onSuccess, onError, text]);
+        // Poll for window.google if it's not yet loaded (async defer script)
+        const timer = setInterval(() => {
+            if (window.google) {
+                init();
+                clearInterval(timer);
+            }
+        }, 100);
 
-    return <div ref={googleButtonRef} className="w-full flex justify-center mt-4"></div>;
+        return () => clearInterval(timer);
+    }, [text]);
+
+    return (
+        <div 
+            ref={googleButtonRef} 
+            className="w-full flex justify-center mt-4 min-h-[50px] transition-all duration-300"
+            style={{ contain: 'layout' }}
+        ></div>
+    );
 };
 
 export default GoogleLoginButton;

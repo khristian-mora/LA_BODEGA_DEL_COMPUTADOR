@@ -35,6 +35,9 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
     // Parse damage photos (fotos del daño)
     const damagePhotos = safeParse(ticket.damagePhotos).filter(p => p && !p.startsWith('blob:'));
 
+    // Parse delivery photos (fotos de entrega / equipo reparado)
+    const deliveryPhotos = safeParse(ticket.photosDelivery).filter(p => p && !p.startsWith('blob:'));
+
     // Labor items
     const laborItems = safeParse(ticket.laborItems);
     const totalLaborCost = laborItems.reduce((sum, item) => sum + (item.price || 0), 0);
@@ -659,7 +662,7 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             </div>
 
             <!-- Diagnosis -->
-            ${currentPhase >= 2 ? `
+            ${(currentPhase >= 2 || ticket.diagnosis) ? `
             <div class="section" style="margin-bottom: 40px;">
                 <div class="card-title">Análisis y Diagnóstico Técnico</div>
                 <div class="highlight-box">
@@ -673,7 +676,7 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             ` : ''}
 
             <!-- Findings & Recommendations -->
-            ${currentPhase >= 2 ? `
+            ${(currentPhase >= 2 || findings.length > 0 || recommendations.length > 0) ? `
             <div class="info-grid" style="margin-bottom: 40px;">
                 <div>
                     <div class="card-title">Hallazgos</div>
@@ -705,7 +708,7 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             ` : ''}
 
             <!-- Damage Photos -->
-            ${currentPhase >= 2 && damagePhotos.length > 0 ? `
+            ${((currentPhase >= 2 || damagePhotos.length > 0) && damagePhotos.length > 0) ? `
             <div class="section" style="margin-bottom: 40px;">
                 <div class="card-title" style="color: #dc2626;">Evidencia del Daño / Falla Detectada</div>
                 <div class="evidence-grid">
@@ -718,8 +721,22 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             </div>
             ` : ''}
 
+            <!-- Delivery Photos -->
+            ${deliveryPhotos.length > 0 ? `
+            <div class="section" style="margin-bottom: 40px;">
+                <div class="card-title" style="color: #10b981;">Evidencia de Entrega (Equipo Reparado)</div>
+                <div class="evidence-grid">
+                    ${deliveryPhotos.map(url => `
+                        <div class="photo-frame" style="border-color: #a7f3d0;">
+                            <img src="${getAbsoluteUrl(url, baseUrl)}" alt="Entrega">
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            ` : ''}
+
             <!-- Repair Notes -->
-            ${currentPhase >= 5 && ticket.repairNotes ? `
+            ${ticket.repairNotes ? `
             <div class="section" style="margin-bottom: 40px;">
                 <div class="card-title">Trabajos Realizados</div>
                 <div class="highlight-box" style="background: #fdf4ff; border-left-color: #a855f7;">
@@ -729,7 +746,7 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             ` : ''}
 
             <!-- Quote/Costs -->
-            ${currentPhase >= 2 ? `
+            ${(currentPhase >= 2 || quoteItems.length > 0 || laborItems.length > 0 || laborCost > 0) ? `
             <div class="section">
                 <div class="card-title">${status === 'REJECTED' ? 'Cargos de Revisión Técnica' : 'Presupuesto de Intervención'}</div>
                 <table class="modern-table">
@@ -848,7 +865,7 @@ const generateCustomerReport = (ticket, baseUrl, settings = {}) => {
             ` : ''}
 
             <!-- Políticas -->
-            ${currentPhase >= 2 ? `
+            ${(currentPhase >= 2 || ticket.diagnosis) ? `
             <div class="policy-section">
                 <div class="policy-grid">
                     <div>
